@@ -3,6 +3,8 @@ import torch.nn as nn
 import sys
 import torchvision
 
+from typing import Tuple
+
 class RecurrentDepthBackbone(nn.Module):
     def __init__(self, base_backbone, env_cfg) -> None:
         super().__init__()
@@ -67,35 +69,103 @@ class StackDepthEncoder(nn.Module):
         return depth_latent
 
     
-class DepthOnlyFCBackbone58x87(nn.Module):
-    def __init__(self, prop_dim, scandots_output_dim, hidden_state_dim, output_activation=None, num_frames=1):
-        super().__init__()
+class AttentionEncoder(nn.Module):
+    def __init__(
+        self,
+        num_obs: int,
+        hidden_dim: int = 64,
+        height_points: torch.Tensor = None,
+        exteroception_dims: Tuple[int, int] = (12, 11),
+        activation: str = "elu",
+        conv_params: dict = {"kernel_size": 5, "stride": 1, "padding": "same"}  # Default parameters for convolution,
+    ):
+        """Attention-based encoder for proprioception and exteroception data.
 
-        self.num_frames = num_frames
-        activation = nn.ELU()
-        self.image_compression = nn.Sequential(
-            # [1, 58, 87]
-            nn.Conv2d(in_channels=self.num_frames, out_channels=32, kernel_size=5),
-            # [32, 54, 83]
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            # [32, 27, 41]
-            activation,
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3),
-            activation,
-            nn.Flatten(),
-            # [32, 25, 39]
-            nn.Linear(64 * 25 * 39, 128),
-            activation,
-            nn.Linear(128, scandots_output_dim)
+        The encoder can be used to model both the actor and critic networks in an actor-critic architecture.
+
+        Args:
+            num_obs (int): Dimension of the proprioception input.
+            hidden_dim (int, optional): Dimension of the hidden layer. Defaults to 64.
+            height_points (torch.Tensor | None, optional): Tensor containing the positions of the height points in the grid. Defaults to None.
+            exteroception_dims (tuple[int, int]): Dimensions of the exteroception input (dim1, dim2).
+            activation (str, optional): Activation function to use. Defaults to "elu".
+            conv_params (dict, optional): Parameters for the convolutional layer. Defaults to {'kernel_size': 5, 'stride': 1}.
+
+        Raises:
+            AssertionError: If the exteroception dimensions are not divisible by the kernel size.
+        """
+        super().__init__()
+        self.num_obs = num_obs
+        self.num_patches = height_points.shape[-2]
+        self.exteroception_dims = exteroception_dims
+        self.height_points = height_points[..., :2].clone()
+        
+        assert conv_params["padding"] == "same", \
+            "Padding must be set to 'same' to ensure the output dimensions match the input dimensions \
+            for the convolutional layers."
+
+        self.activation = nn.ELU() if activation == "elu" else nn.ReLU()
+        self.proprioception_encoder = nn.Linear(num_obs, hidden_dim)
+
+        self.position_encoder = nn.Embedding(
+            num_embeddings = self.num_patches,
+            embedding_dim = hidden_dim
         )
 
-        if output_activation == "tanh":
-            self.output_activation = nn.Tanh()
-        else:
-            self.output_activation = activation
+        # Convolutional encoder for exteroception
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 16, **conv_params),
+            self.activation,
+            nn.Conv2d(16, hidden_dim - 2, **conv_params),
+            self.activation,
+            nn.Flatten(-2),  # Flatten the last two dimensions to get patches
+        )
 
-    def forward(self, images: torch.Tensor):
-        images_compressed = self.image_compression(images.unsqueeze(1))
-        latent = self.output_activation(images_compressed)
+        self.attention = nn.MultiheadAttention(
+            embed_dim = hidden_dim, # Hidden dimension + 2 for yaw prediction
+            num_heads = 16,
+            batch_first = True,
+        )
 
-        return latent
+        self.out_projection = nn.Linear(hidden_dim, hidden_dim + 2)  # Output dimension is hidden_dim + 2 for yaw prediction
+
+        self.att_scores: torch.Tensor | None = None  # Placeholder for attention scores
+
+
+
+    def forward(self, exteroception: torch.Tensor, proprioception: torch.Tensor, need_weights: bool = False) -> torch.Tensor:
+        num_envs = proprioception.shape[0]
+
+        # Fold exteroception by the number of history steps
+        exteroception = exteroception.view(
+            num_envs,
+            1, # Height measurement channel
+            self.exteroception_dims[0], # x dimension
+            self.exteroception_dims[1], # y dimension
+        )  # (num_envs, channels, dim1, dim2)
+
+        # Proprioception encoding
+        proprio_encoded = self.activation(self.proprioception_encoder(proprioception))
+
+        # Exteroception encoding
+        extero_encoded = self.conv(exteroception) # (num_envs, hidden_dim, num_patches)
+        extero_encoded = extero_encoded.permute(0, 2, 1)  # (num_envs, num_patches, hidden_dim - 2)
+        extero_encoded = torch.cat([self.height_points.expand(num_envs, -1, -1), extero_encoded], -1) # (num_envs, num_patches, hidden_dim), add grid indices to the exteroception encodin
+
+        # Unsqueeze to add a target sequence length dimension for attention
+        proprio_encoded = proprio_encoded.unsqueeze(1)  # (num_envs, 1, hidden_dim)
+
+        # Compute attention
+        att_output, self.att_scores = self.attention(
+            query = proprio_encoded,  # Query: (num_envs, 1, hidden_dim)
+            key   = extero_encoded,   # Key (num_envs, num_patches, hidden_dim)
+            value = extero_encoded,   # Value (num_envs, num_patches, hidden_dim)
+            need_weights=need_weights
+        ) # Output shape: (num_envs, 1, hidden_dim), (att_scores shape: (num_envs, 1, num_patches)
+
+        att_output = att_output.squeeze(1)  # (num_envs, hidden_dim)
+
+        # Output projection
+        output = self.out_projection(self.activation(att_output))  # (num_envs, hidden_dim + 2)
+
+        return output

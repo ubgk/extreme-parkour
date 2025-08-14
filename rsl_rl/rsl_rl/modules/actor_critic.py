@@ -202,8 +202,10 @@ class Actor(nn.Module):
         hist = obs[:, -self.num_hist*self.num_prop:]
         return self.history_encoder(hist.view(-1, self.num_hist, self.num_prop))
     
-    def infer_scandots_latent(self, obs):
-        scan = obs[:, self.num_prop:self.num_prop + self.num_scan]
+    def extract_scan(self, obs):
+        return obs[:, self.num_prop:self.num_prop + self.num_scan]
+    
+    def infer_scandots_latent(self, scan):
         return self.scan_encoder(scan)
 
 class ActorCriticRMA(nn.Module):

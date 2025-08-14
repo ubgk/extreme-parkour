@@ -77,11 +77,11 @@ class OnPolicyRunner:
         # Depth encoder
         self.if_depth = self.depth_encoder_cfg["if_depth"]
         if self.if_depth:
-            depth_backbone = DepthOnlyFCBackbone58x87(env.cfg.env.n_proprio, 
-                                                    self.policy_cfg["scan_encoder_dims"][-1], 
-                                                    self.depth_encoder_cfg["hidden_dims"],
-                                                    )
-            depth_encoder = RecurrentDepthBackbone(depth_backbone, env.cfg).to(self.device)
+            depth_backbone = AttentionEncoder(num_obs = env.cfg.env.n_proprio, 
+                                               hidden_dim = self.policy_cfg["scan_encoder_dims"][-1], # latent vector dimension
+                                               height_points=self.env.height_points
+                                               )
+            depth_encoder = depth_backbone.to(self.device) #RecurrentDepthBackbone(depth_backbone, env.cfg).to(self.device)
             depth_actor = deepcopy(actor_critic.actor)
         else:
             depth_encoder = None
@@ -230,7 +230,7 @@ class OnPolicyRunner:
 
         obs = self.env.get_observations()
         infos = {}
-        infos["depth"] = self.env.depth_buffer.clone().to(self.device)[:, -1] if self.if_depth else None
+        infos["depth"] = True if self.if_depth else None
         infos["delta_yaw_ok"] = torch.ones(self.env.num_envs, dtype=torch.bool, device=self.device)
         self.alg.depth_encoder.train()
         self.alg.depth_actor.train()
@@ -248,12 +248,13 @@ class OnPolicyRunner:
             for i in range(self.depth_encoder_cfg["num_steps_per_env"]):
                 if infos["depth"] != None:
                     with torch.no_grad():
-                        scandots_latent = self.alg.actor_critic.actor.infer_scandots_latent(obs)
+                        scandots = self.alg.actor_critic.actor.extract_scan(obs)
+                        scandots_latent = self.alg.actor_critic.actor.infer_scandots_latent(scandots)
                     scandots_latent_buffer.append(scandots_latent)
                     obs_prop_depth = obs[:, :self.env.cfg.env.n_proprio].clone()
                     obs_prop_depth[:, 6:8] = 0
-                    depth_latent_and_yaw = self.alg.depth_encoder(infos["depth"].clone(), obs_prop_depth)  # clone is crucial to avoid in-place operation
-                    
+                    depth_latent_and_yaw = self.alg.depth_encoder(scandots.clone(), obs_prop_depth)  # clone is crucial to avoid in-place operation
+
                     depth_latent = depth_latent_and_yaw[:, :-2]
                     yaw = 1.5*depth_latent_and_yaw[:, -2:]
                     
@@ -312,7 +313,7 @@ class OnPolicyRunner:
             stop = time.time()
             learn_time = stop - start
 
-            self.alg.depth_encoder.detach_hidden_states()
+            # self.alg.depth_encoder.detach_hidden_states()
 
             if self.log_dir is not None:
                 self.log_vision(locals())

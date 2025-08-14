@@ -177,6 +177,7 @@ class LeggedRobot(BaseTask):
         return depth_image[:-2, 4:-4]
 
     def update_depth_buffer(self):
+        return # no-op
         if not self.cfg.depth.use_camera:
             return
 
