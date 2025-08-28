@@ -134,6 +134,7 @@ class AttentionEncoder(nn.Module):
 
 
     def forward(self, exteroception: torch.Tensor, proprioception: torch.Tensor, need_weights: bool = False) -> torch.Tensor:
+        # breakpoint()
         num_envs = proprioception.shape[0]
 
         # Fold exteroception by the number of history steps

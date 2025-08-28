@@ -128,7 +128,8 @@ def play(args):
         policy = ppo_runner.get_inference_policy(device=env.device)
     estimator = ppo_runner.get_estimator_inference_policy(device=env.device)
     if env.cfg.depth.use_camera:
-        depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
+        depth_encoder = ppo_runner.alg.depth_encoder.to(env.device)
+        depth_encoder.eval()
 
     actions = torch.zeros(env.num_envs, 12, device=env.device, requires_grad=False)
     infos = {}
@@ -150,11 +151,12 @@ def play(args):
             if env.cfg.depth.use_camera:
                 if infos["depth"] is not None:
                     obs_student = obs[:, :env.cfg.env.n_proprio].clone()
-                    obs_student[:, 6:8] = 0
-                    depth_latent_and_yaw = depth_encoder(infos["depth"], obs_student)
+                    # obs_student[:, 6:8] = 0
+                    scandots = ppo_runner.alg.actor_critic.actor.extract_scan(obs) * 2
+                    depth_latent_and_yaw = depth_encoder(scandots.clone(), obs_student)  # clone is crucial to avoid in-place operation
                     depth_latent = depth_latent_and_yaw[:, :-2]
                     yaw = depth_latent_and_yaw[:, -2:]
-                obs[:, 6:8] = 1.5*yaw
+                # obs[:, 6:8] = 1.5*yaw
                     
             else:
                 depth_latent = None
