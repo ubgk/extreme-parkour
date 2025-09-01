@@ -98,7 +98,7 @@ def play(args):
     env_cfg.terrain.max_difficulty = True
     
     env_cfg.depth.angle = [0, 1]
-    env_cfg.noise.add_noise = True
+    env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = True
     env_cfg.domain_rand.push_robots = False
     env_cfg.domain_rand.push_interval_s = 6
@@ -117,7 +117,8 @@ def play(args):
     # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
-    
+    env.ppo_runner = ppo_runner # a bit hacky, but a way for rendering attention weights
+
     if args.use_jit:
         path = os.path.join(log_pth, "traced")
         model, checkpoint = get_load_path(root=path, checkpoint=args.checkpoint)

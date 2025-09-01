@@ -519,7 +519,6 @@ class OnPolicyRunner:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         # self.current_learning_iteration = loaded_dict['iter']
         print("*" * 80)
-        breakpoint()
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):

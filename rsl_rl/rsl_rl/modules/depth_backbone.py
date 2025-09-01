@@ -133,7 +133,7 @@ class AttentionEncoder(nn.Module):
 
 
 
-    def forward(self, exteroception: torch.Tensor, proprioception: torch.Tensor, need_weights: bool = False) -> torch.Tensor:
+    def forward(self, exteroception: torch.Tensor, proprioception: torch.Tensor, need_weights: bool = True) -> torch.Tensor:
         # breakpoint()
         num_envs = proprioception.shape[0]
 

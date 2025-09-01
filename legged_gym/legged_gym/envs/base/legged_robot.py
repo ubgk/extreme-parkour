@@ -276,7 +276,7 @@ class LeggedRobot(BaseTask):
             self._draw_height_samples()
             self._draw_goals()
             self._draw_feet()
-            if self.cfg.depth.use_camera:
+            if self.cfg.depth.use_camera and False:
                 window_name = "Depth Image"
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
                 cv2.imshow("Depth Image", self.depth_buffer[self.lookat_id, -1].cpu().numpy() + 0.5)
@@ -1078,17 +1078,39 @@ class LeggedRobot(BaseTask):
         if not self.terrain.cfg.measure_heights:
             return
         self.gym.refresh_rigid_body_state_tensor(self.sim)
-        sphere_geom = gymutil.WireframeSphereGeometry(0.02, 12, 12, None, color=(1, 0, 0))
+        sphere_geom = gymutil.WireframeSphereGeometry(1.0, 24, 24, None, color=(1, 0, 0))
+        verts = sphere_geom.verts.copy().view(np.float32)
+        colors = sphere_geom._colors.copy().view(np.float32).reshape(-1, 3)
         i = self.lookat_id
         base_pos = (self.root_states[i, :3]).cpu().numpy()
         heights = self.measured_heights[i].cpu().numpy()
         height_points = quat_apply_yaw(self.base_quat[i].repeat(heights.shape[0]), self.height_points[i]).cpu().numpy()
+
+        if hasattr(self, 'ppo_runner'):
+            att_scores = self.ppo_runner.alg.depth_encoder.att_scores
+            att_scores = att_scores[i].squeeze().detach().cpu().numpy() if att_scores is not None else None
+        else:
+            att_scores = None
+
+        if att_scores is not None:
+            radii = att_scores / np.max(att_scores) * 0.04 + 0.01
+            redness = att_scores / np.max(att_scores)
+        else:
+            radii = np.ones_like(heights) * 0.02
+            redness = np.ones_like(heights)
+
         for j in range(heights.shape[0]):
+            if att_scores is not None:
+                sphere_geom.verts = (verts * radii[j]).view(sphere_geom.verts.dtype)
+                colors[:, 0] = redness[j]
+                colors[:, 1:] = 0.
+                colors[:, 2] = 1. - redness[j]
+                sphere_geom._colors = colors.view(sphere_geom._colors.dtype)
+
             x = height_points[j, 0] + base_pos[0]
             y = height_points[j, 1] + base_pos[1]
             z = heights[j]
             sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
-            # breakpoint()
             gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
     
     def _draw_goals(self):
