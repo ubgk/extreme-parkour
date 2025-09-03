@@ -153,7 +153,7 @@ def play(args):
                 if infos["depth"] is not None:
                     obs_student = obs[:, :env.cfg.env.n_proprio].clone()
                     # obs_student[:, 6:8] = 0
-                    scandots = ppo_runner.alg.actor_critic.actor.extract_scan(obs) * 2
+                    scandots = ppo_runner.alg.actor_critic.actor.extract_scan(obs)
                     depth_latent_and_yaw = depth_encoder(scandots.clone(), obs_student)  # clone is crucial to avoid in-place operation
                     depth_latent = depth_latent_and_yaw[:, :-2]
                     yaw = depth_latent_and_yaw[:, -2:]
