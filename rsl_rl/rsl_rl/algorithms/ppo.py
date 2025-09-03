@@ -125,8 +125,8 @@ class PPO:
         self.if_depth = depth_encoder != None
         if self.if_depth:
             self.depth_encoder = depth_encoder
-            self.depth_encoder_optimizer = optim.Adam(self.depth_encoder.parameters(), lr=depth_encoder_paras["learning_rate"])
-            self.depth_encoder_paras = depth_encoder_paras
+            # self.depth_encoder_optimizer = optim.Adam(self.depth_encoder.parameters(), lr=depth_encoder_paras["learning_rate"])
+            # self.depth_encoder_paras = depth_encoder_paras
             self.depth_actor = depth_actor
             self.depth_actor_optimizer = optim.Adam([*self.depth_actor.parameters(), *self.depth_encoder.parameters()], lr=depth_encoder_paras["learning_rate"])
 
