@@ -74,6 +74,7 @@ class AttentionEncoder(nn.Module):
         self,
         num_obs: int,
         hidden_dim: int = 64,
+        output_dim: int = -1,
         height_points: torch.Tensor = None,
         exteroception_dims: Tuple[int, int] = (12, 11),
         activation: str = "elu",
@@ -86,6 +87,7 @@ class AttentionEncoder(nn.Module):
         Args:
             num_obs (int): Dimension of the proprioception input.
             hidden_dim (int, optional): Dimension of the hidden layer. Defaults to 64.
+            output_dim (int, optional): Dimension of the output layer. If -1, defaults to hidden_dim. Defaults to -1.
             height_points (torch.Tensor | None, optional): Tensor containing the positions of the height points in the grid. Defaults to None.
             exteroception_dims (tuple[int, int]): Dimensions of the exteroception input (dim1, dim2).
             activation (str, optional): Activation function to use. Defaults to "elu".
@@ -98,7 +100,7 @@ class AttentionEncoder(nn.Module):
         self.num_obs = num_obs
         self.num_patches = height_points.shape[-2]
         self.exteroception_dims = exteroception_dims
-        self.height_points = height_points[..., :2].clone()
+        self.height_points = height_points[0][..., :2].clone()
         
         assert conv_params["padding"] == "same", \
             "Padding must be set to 'same' to ensure the output dimensions match the input dimensions \
@@ -127,7 +129,8 @@ class AttentionEncoder(nn.Module):
             batch_first = True,
         )
 
-        self.out_projection = nn.Linear(hidden_dim, hidden_dim + 2)  # Output dimension is hidden_dim + 2 for yaw prediction
+        self.output_dim = hidden_dim if output_dim == -1 else output_dim
+        self.out_projection = nn.Linear(hidden_dim, self.output_dim)  # Project to the desired output dimension
 
         self.att_scores: torch.Tensor | None = None  # Placeholder for attention scores
 
@@ -169,4 +172,34 @@ class AttentionEncoder(nn.Module):
         # Output projection
         output = self.out_projection(self.activation(att_output))  # (num_envs, hidden_dim + 2)
 
+        return output
+
+class CriticWrapper(nn.Module):
+    def __init__(self, encoder: AttentionEncoder, backbone: nn.Module, 
+                 num_prop: int = -1, num_scan: int = -1, 
+                 activation: nn.Module = nn.ELU()) -> None:
+        super().__init__()
+        self.encoder = encoder
+        self.backbone = backbone
+        self.activation = activation
+
+        assert num_prop >= 0 and num_scan >= 0, "num_prop and num_scan must be specified"
+        self.num_prop = num_prop
+        self.num_scan = num_scan
+
+        assert self.encoder.num_obs == num_prop, "Encoder num_obs must match num_prop"
+        assert self.encoder.exteroception_dims[0] * self.encoder.exteroception_dims[1] == num_scan, "Encoder exteroception_dims must match num_scan"
+
+
+    def forward(self, critic_obs) -> torch.Tensor:
+        proprioception = critic_obs[:, :self.num_prop]
+        exteroception = critic_obs[:, self.num_prop:self.num_prop + self.num_scan]
+        other_obs = critic_obs[:, self.num_prop + self.num_scan:]
+
+        encoding_yaw = self.encoder(exteroception, proprioception)
+        encoding = encoding_yaw[:, :-2]
+        encoding = self.activation(encoding)
+        encoding = torch.cat([proprioception, encoding, other_obs], dim=-1)
+
+        output = self.backbone(encoding)
         return output

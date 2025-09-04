@@ -65,6 +65,15 @@ class OnPolicyRunner:
         self.env = env
 
         print("Using MLP and Priviliged Env encoder ActorCritic structure")
+        depth_hidden_dim = self.policy_cfg["scan_encoder_dims"][-1]
+        depth_out_dim = depth_hidden_dim + 2
+        depth_encoder = AttentionEncoder(
+                num_obs = env.cfg.env.n_proprio,
+                hidden_dim = self.policy_cfg["scan_encoder_dims"][-1], # latent vector dimension
+                output_dim=depth_out_dim,
+                height_points=self.env.height_points
+            ).to(device)
+
         actor_critic: ActorCriticRMA = ActorCriticRMA(self.env.cfg.env.n_proprio,
                                                       self.env.cfg.env.n_scan,
                                                       self.env.num_obs,
@@ -72,26 +81,12 @@ class OnPolicyRunner:
                                                       self.env.cfg.env.n_priv,
                                                       self.env.cfg.env.history_len,
                                                       self.env.num_actions,
+                                                      depth_encoder=depth_encoder,
                                                       **self.policy_cfg).to(self.device)
         estimator = Estimator(input_dim=env.cfg.env.n_proprio, output_dim=env.cfg.env.n_priv, hidden_dims=self.estimator_cfg["hidden_dims"]).to(self.device)
-        # Depth encoder
-        self.if_depth = self.depth_encoder_cfg["if_depth"]
-        # breakpoint()
-        if self.if_depth:
-            depth_backbone = AttentionEncoder(num_obs = env.cfg.env.n_proprio, 
-                                               hidden_dim = self.policy_cfg["scan_encoder_dims"][-1], # latent vector dimension
-                                               height_points=self.env.height_points
-                                               )
-            depth_encoder = depth_backbone.to(self.device) #RecurrentDepthBackbone(depth_backbone, env.cfg).to(self.device)
-            depth_actor = deepcopy(actor_critic.actor)
-        else:
-            depth_encoder = None
-            depth_actor = None
-        # self.depth_encoder = depth_encoder
-        # self.depth_encoder_optimizer = optim.Adam(self.depth_encoder.parameters(), lr=self.depth_encoder_cfg["learning_rate"])
-        # self.depth_encoder_paras = self.depth_encoder_cfg
-        # self.depth_encoder_criterion = nn.MSELoss()
-        # Create algorithm
+        # Extract the depth actor
+        depth_actor = actor_critic.actor
+
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
         self.alg: PPO = alg_class(actor_critic, 
                                   estimator, self.estimator_cfg, 
@@ -108,9 +103,6 @@ class OnPolicyRunner:
             [self.env.num_privileged_obs], 
             [self.env.num_actions],
         )
-
-        self.learn = self.learn_RL if not self.if_depth else self.learn_vision
-            
         # Log
         self.log_dir = log_dir
         self.writer = None
@@ -119,7 +111,7 @@ class OnPolicyRunner:
         self.current_learning_iteration = 0
         
 
-    def learn_RL(self, num_learning_iterations, init_at_random_ep_len=False):
+    def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         mean_value_loss = 0.
         mean_surrogate_loss = 0.
         mean_estimator_loss = 0.
@@ -139,7 +131,6 @@ class OnPolicyRunner:
         critic_obs = privileged_obs if privileged_obs is not None else obs
         obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
         infos = {}
-        infos["depth"] = self.env.depth_buffer.clone().to(self.device) if self.if_depth else None
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
 
         ep_infos = []
@@ -492,32 +483,33 @@ class OnPolicyRunner:
             'iter': self.current_learning_iteration,
             'infos': infos,
             }
-        if self.if_depth:
-            state_dict['depth_encoder_state_dict'] = self.alg.depth_encoder.state_dict()
-            state_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
+        state_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
         torch.save(state_dict, path)
 
     def load(self, path, load_optimizer=True):
         print("*" * 80)
         print("Loading model from {}...".format(path))
         loaded_dict = torch.load(path, map_location=self.device)
-        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
-        self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
-        if self.if_depth:
-            if 'depth_encoder_state_dict' not in loaded_dict:
-                warnings.warn("'depth_encoder_state_dict' key does not exist, not loading depth encoder...")
-            else:
-                print("Saved depth encoder detected, loading...")
-                self.alg.depth_encoder.load_state_dict(loaded_dict['depth_encoder_state_dict'])
-            if 'depth_actor_state_dict' in loaded_dict:
-                print("Saved depth actor detected, loading...")
-                self.alg.depth_actor.load_state_dict(loaded_dict['depth_actor_state_dict'])
-            else:
-                print("No saved depth actor, Copying actor critic actor to depth actor...")
-                self.alg.depth_actor.load_state_dict(self.alg.actor_critic.actor.state_dict())
-        if load_optimizer:
-            self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-        # self.current_learning_iteration = loaded_dict['iter']
+
+        depth_actor_dict = {k: v for k, v in loaded_dict['depth_actor_state_dict'].items() if 'actor_backbone' in k}
+
+        if len(depth_actor_dict) != len(loaded_dict['depth_actor_state_dict']):
+            warnings.warn("The loaded depth actor contains more than just the backbone, not loading the extra weights...")
+
+        if 'depth_encoder_state_dict' not in loaded_dict:
+            raise RuntimeError("'depth_encoder_state_dict' key does not exist, not loading depth encoder...")
+        else:
+            print("Saved depth encoder detected, loading...")
+            self.alg.depth_encoder.load_state_dict(loaded_dict['depth_encoder_state_dict']) # OK
+
+        if 'depth_actor_state_dict' in loaded_dict:
+            print("Saved depth actor detected, loading...")
+            self.alg.depth_actor.scan_encoder = None
+            self.alg.depth_actor.load_state_dict(loaded_dict['depth_actor_state_dict'])
+            self.alg.depth_actor.scan_encoder = self.alg.depth_encoder
+        else:
+            raise RuntimeError("'depth_actor_state_dict' key does not exist, not loading depth actor...")
+        
         print("*" * 80)
         return loaded_dict['infos']
 

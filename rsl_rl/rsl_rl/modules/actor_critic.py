@@ -37,6 +37,7 @@ from torch.distributions import Normal
 from torch.nn.modules import rnn
 from torch.nn.modules.activation import ReLU
 
+from rsl_rl.modules.depth_backbone import AttentionEncoder, CriticWrapper
 
 class StateHistoryEncoder(nn.Module):
     def __init__(self, activation_fn, input_size, tsteps, output_size, tanh_encoder_output=False):
@@ -95,6 +96,7 @@ class Actor(nn.Module):
                  num_priv_latent, 
                  num_priv_explicit, 
                  num_hist, activation, 
+                 depth_encoder: AttentionEncoder,
                  tanh_encoder_output=False) -> None:
         super().__init__()
         # prop -> scan -> priv_explicit -> priv_latent -> hist
@@ -106,6 +108,9 @@ class Actor(nn.Module):
         self.num_priv_latent = num_priv_latent
         self.num_priv_explicit = num_priv_explicit
         self.if_scan_encode = scan_encoder_dims is not None and num_scan > 0
+
+        self.activation = activation
+        self.scan_encoder: AttentionEncoder = depth_encoder
 
         if len(priv_encoder_dims) > 0:
                     priv_encoder_layers = []
@@ -122,29 +127,11 @@ class Actor(nn.Module):
 
         self.history_encoder = StateHistoryEncoder(activation, num_prop, num_hist, priv_encoder_output_dim)
 
-        if self.if_scan_encode:
-            scan_encoder = []
-            scan_encoder.append(nn.Linear(num_scan, scan_encoder_dims[0]))
-            scan_encoder.append(activation)
-            for l in range(len(scan_encoder_dims) - 1):
-                if l == len(scan_encoder_dims) - 2:
-                    scan_encoder.append(nn.Linear(scan_encoder_dims[l], scan_encoder_dims[l+1]))
-                    scan_encoder.append(nn.Tanh())
-                else:
-                    scan_encoder.append(nn.Linear(scan_encoder_dims[l], scan_encoder_dims[l + 1]))
-                    scan_encoder.append(activation)
-            self.scan_encoder = nn.Sequential(*scan_encoder)
-            self.scan_encoder_output_dim = scan_encoder_dims[-1]
-        else:
-            self.scan_encoder = nn.Identity()
-            self.scan_encoder_output_dim = num_scan
-        
+        num_actor_obs = num_prop + self.scan_encoder.output_dim + num_priv_explicit + priv_encoder_output_dim
+        num_actor_obs -= 2 # remove yaw from scan encoding
+
         actor_layers = []
-        actor_layers.append(nn.Linear(num_prop+
-                                      self.scan_encoder_output_dim+
-                                      num_priv_explicit+
-                                      priv_encoder_output_dim, 
-                                      actor_hidden_dims[0]))
+        actor_layers.append(nn.Linear(num_actor_obs, actor_hidden_dims[0]))
         actor_layers.append(activation)
         for l in range(len(actor_hidden_dims)):
             if l == len(actor_hidden_dims) - 1:
@@ -159,8 +146,9 @@ class Actor(nn.Module):
     def forward(self, obs, hist_encoding: bool, scandots_latent=None):
         if self.if_scan_encode:
             obs_scan = obs[:, self.num_prop:self.num_prop + self.num_scan]
+            obs_prop = obs[:, :self.num_prop]
             if scandots_latent is None:
-                scan_latent = self.scan_encoder(obs_scan)   
+                scan_latent = self.scan_encoder(obs_scan, obs_prop)[:, :-2] # remove yaw
             else:
                 scan_latent = scandots_latent
             obs_prop_scan = torch.cat([obs[:, :self.num_prop], scan_latent], dim=1)
@@ -198,6 +186,7 @@ class ActorCriticRMA(nn.Module):
                         num_priv_explicit,
                         num_hist,
                         num_actions,
+                        depth_encoder: AttentionEncoder,
                         scan_encoder_dims=[256, 256, 256],
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
@@ -212,10 +201,15 @@ class ActorCriticRMA(nn.Module):
         priv_encoder_dims= kwargs['priv_encoder_dims']
         activation = get_activation(activation)
         
-        self.actor = Actor(num_prop, num_scan, num_actions, scan_encoder_dims, actor_hidden_dims, priv_encoder_dims, num_priv_latent, num_priv_explicit, num_hist, activation, tanh_encoder_output=kwargs['tanh_encoder_output'])
+        self.actor = Actor(num_prop, num_scan, num_actions, scan_encoder_dims, 
+                           actor_hidden_dims, priv_encoder_dims, num_priv_latent, 
+                           num_priv_explicit, num_hist, activation,
+                           depth_encoder=depth_encoder, tanh_encoder_output=kwargs['tanh_encoder_output'])
         
 
-        # Value function
+        # We build the critic with the attention encoder as well, to share weights
+        num_critic_obs = num_critic_obs + depth_encoder.output_dim - num_scan
+        num_critic_obs -= 2 # remove yaw from scan encoding
         critic_layers = []
         critic_layers.append(nn.Linear(num_critic_obs, critic_hidden_dims[0]))
         critic_layers.append(activation)
@@ -225,7 +219,9 @@ class ActorCriticRMA(nn.Module):
             else:
                 critic_layers.append(nn.Linear(critic_hidden_dims[l], critic_hidden_dims[l + 1]))
                 critic_layers.append(activation)
-        self.critic = nn.Sequential(*critic_layers)
+
+        critic_backbone = nn.Sequential(*critic_layers)
+        self.critic = CriticWrapper(encoder=depth_encoder, backbone=critic_backbone, activation=activation, num_prop=num_prop, num_scan=num_scan)
 
         # Action noise
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
