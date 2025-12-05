@@ -27,7 +27,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/base.dae" />
+          filename="../meshes/base.dae" />
       </geometry>
       <material
         name="">
@@ -140,7 +140,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/hip.dae" />
+          filename="../meshes/hip.dae" />
       </geometry>
       <material
         name="">
@@ -207,7 +207,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/thigh.dae" />
+          filename="../meshes/thigh.dae" />
       </geometry>
       <material
         name="">
@@ -274,7 +274,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/calf.dae" />
+          filename="../meshes/calf.dae" />
       </geometry>
       <material
         name="">
@@ -385,7 +385,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/foot.dae" />
+          filename="../meshes/foot.dae" />
       </geometry>
       <material
         name="">
@@ -435,7 +435,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="3.1415 0 0" />
       <geometry>
         <mesh
-          filename="./dae/hip.dae" />
+          filename="../meshes/hip.dae" />
       </geometry>
       <material
         name="">
@@ -502,7 +502,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/thigh_mirror.dae" />
+          filename="../meshes/thigh_mirror.dae" />
       </geometry>
       <material
         name="">
@@ -569,7 +569,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/calf_mirror.dae" />
+          filename="../meshes/calf_mirror.dae" />
       </geometry>
       <material
         name="">
@@ -680,7 +680,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/foot.dae" />
+          filename="../meshes/foot.dae" />
       </geometry>
       <material
         name="">
@@ -730,7 +730,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 3.1415 0" />
       <geometry>
         <mesh
-          filename="./dae/hip.dae" />
+          filename="../meshes/hip.dae" />
       </geometry>
       <material
         name="">
@@ -797,7 +797,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/thigh.dae" />
+          filename="../meshes/thigh.dae" />
       </geometry>
       <material
         name="">
@@ -864,7 +864,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/calf.dae" />
+          filename="../meshes/calf.dae" />
       </geometry>
       <material
         name="">
@@ -975,7 +975,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/foot.dae" />
+          filename="../meshes/foot.dae" />
       </geometry>
       <material
         name="">
@@ -1025,7 +1025,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="3.1415 3.1415 0" />
       <geometry>
         <mesh
-          filename="./dae/hip.dae" />
+          filename="../meshes/hip.dae" />
       </geometry>
       <material
         name="">
@@ -1092,7 +1092,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/thigh_mirror.dae" />
+          filename="../meshes/thigh_mirror.dae" />
       </geometry>
       <material
         name="">
@@ -1159,7 +1159,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/calf_mirror.dae" />
+          filename="../meshes/calf_mirror.dae" />
       </geometry>
       <material
         name="">
@@ -1270,7 +1270,7 @@ Stephen Brawner (brawner@gmail.com)
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="./dae/foot.dae" />
+          filename="../meshes/foot.dae" />
       </geometry>
       <material
         name="">
