@@ -47,6 +47,43 @@ import matplotlib.pyplot as plt
 from time import time, sleep
 from legged_gym.utils import webviewer
 
+class ActorWrapper(torch.nn.Module):
+    def __init__(self, depth_encoder, actor, estimator=None):
+        super().__init__()
+
+        self.depth_encoder = depth_encoder
+        self.hist_encoder = actor.history_encoder
+        self.actor = actor.actor_backbone 
+
+        # base lin vel estimator
+        self.estimator = estimator
+
+    def forward(self, depth, obs_proprio, obs_hist, hidden_states_in, base_lin_vel = None):
+        assert not (base_lin_vel is None and self.estimator is None), \
+                'You have not provided base_lin_vel although there is ' \
+                'no velocity estimator!'
+
+        depth_latent_and_yaw, hidden_states_out = self.depth_encoder(depth, obs_proprio, hidden_states_in=hidden_states_in)
+        depth_latent = depth_latent_and_yaw[:, :-2]
+        yaw = depth_latent_and_yaw[:, -2:]
+
+        obs_proprio[:, 6:8] = 1.5*yaw
+
+        if base_lin_vel is None:
+            obs_priv = self.estimator(obs_proprio)
+        else:
+            # obs_priv_explicit is 9D, first 3D are the base lin vel, the rest are 0
+            obs_priv = torch.zeros((obs.shape[0], 9), device=obs.device) 
+            obs_priv[:, :3] = base_lin_vel
+
+        hist_latent = self.hist_encoder(obs_hist) # obs[:, -self.num_hist*self.num_prop:]
+
+        backbone_input = torch.cat([obs_proprio, depth_latent, obs_priv, hist_latent], dim=1)
+        backbone_output = self.actor(backbone_input)
+
+        return backbone_output, hidden_states_out
+    
+
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     if checkpoint==-1:
         models = [file for file in os.listdir(root) if model_name_include in file]
@@ -134,7 +171,25 @@ def play(args):
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 
+    actor_wrapper = ActorWrapper(depth_encoder, 
+                                 ppo_runner.alg.depth_actor, 
+                                 estimator=estimator
+                    )
+
+    rnn_h = torch.zeros((1, env.num_envs, 512), device=env.device)
+
     for i in range(10*int(env.max_episode_length)):
+#        if infos["depth"] is not None:
+#            depth_buf = infos["depth"].clone()
+#
+#        obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
+#        obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
+#
+#        actions, hidden_states_out = actor_wrapper(depth_buf, obs_proprio, obs_hist, rnn_h) 
+#
+#        if infos["depth"] is not None:
+#            rnn_h[:] = hidden_states_out.detach().clone()
+
         if args.use_jit:
             if env.cfg.depth.use_camera:
                 if infos["depth"] is not None:

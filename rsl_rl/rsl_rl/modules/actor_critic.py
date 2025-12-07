@@ -176,18 +176,20 @@ class Actor(nn.Module):
             backbone_output = self.actor_backbone(backbone_input)
             return backbone_output
         else:
-            if self.if_scan_encode:
+            if self.if_scan_encode: # TRUE
                 obs_scan = obs[:, self.num_prop:self.num_prop + self.num_scan]
-                if scandots_latent is None:
+                if scandots_latent is None: # FALSE
                     scan_latent = self.scan_encoder(obs_scan)   
-                else:
+                else: # HERE
                     scan_latent = scandots_latent
                 obs_prop_scan = torch.cat([obs[:, :self.num_prop], scan_latent], dim=1)
             else:
                 obs_prop_scan = obs[:, :self.num_prop + self.num_scan]
+
+            # obs_priv_explicit is 9D, first 3D are the base lin vel, the rest are 0
             obs_priv_explicit = obs[:, self.num_prop + self.num_scan:self.num_prop + self.num_scan + self.num_priv_explicit]
-            if hist_encoding:
-                latent = self.infer_hist_latent(obs)
+            if hist_encoding: # TRUE
+                latent = self.infer_hist_latent(obs) # obs[:, -self.num_hist*self.num_prop:]
             else:
                 latent = self.infer_priv_latent(obs)
             backbone_input = torch.cat([obs_prop_scan, obs_priv_explicit, latent], dim=1)

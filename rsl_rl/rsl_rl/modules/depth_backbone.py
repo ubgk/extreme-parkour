@@ -28,14 +28,22 @@ class RecurrentDepthBackbone(nn.Module):
                             )
         self.hidden_states = None
 
-    def forward(self, depth_image, proprioception):
+    def forward(self, depth_image, proprioception, hidden_states_in=None):
         depth_image = self.base_backbone(depth_image)
         depth_latent = self.combination_mlp(torch.cat((depth_image, proprioception), dim=-1))
         # depth_latent = self.base_backbone(depth_image)
-        depth_latent, self.hidden_states = self.rnn(depth_latent[:, None, :], self.hidden_states)
+
+        if hidden_states_in is None:
+            depth_latent, self.hidden_states = self.rnn(depth_latent[:, None, :], self.hidden_states)
+        else:
+            depth_latent, hidden_states_out = self.rnn(depth_latent[:, None, :], hidden_states_in)
+
         depth_latent = self.output_mlp(depth_latent.squeeze(1))
-        
-        return depth_latent
+       
+        if hidden_states_in is None:
+            return depth_latent
+        else:
+            return depth_latent, hidden_states_out
 
     def detach_hidden_states(self):
         self.hidden_states = self.hidden_states.detach().clone()
@@ -99,3 +107,4 @@ class DepthOnlyFCBackbone58x87(nn.Module):
         latent = self.output_activation(images_compressed)
 
         return latent
+
