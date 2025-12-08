@@ -161,14 +161,6 @@ def play(args):
     train_cfg.runner.resume = True
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
     
-    if args.use_jit:
-        path = os.path.join(log_pth, "traced")
-        model, checkpoint = get_load_path(root=path, checkpoint=args.checkpoint)
-        path = os.path.join(path, model)
-        print("Loading jit for policy: ", path)
-        policy_jit = torch.jit.load(path, map_location=env.device)
-    else:
-        policy = ppo_runner.get_inference_policy(device=env.device)
     estimator = ppo_runner.get_estimator_inference_policy(device=env.device)
     if env.cfg.depth.use_camera:
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
