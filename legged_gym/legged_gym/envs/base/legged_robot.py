@@ -279,7 +279,7 @@ class LeggedRobot(BaseTask):
             # self._draw_height_samples()
             self._draw_goals()
             self._draw_feet()
-            if self.cfg.depth.use_camera:
+            if False and self.cfg.depth.use_camera:
                 window_name = "Depth Image"
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
                 cv2.imshow("Depth Image", self.depth_buffer[self.lookat_id, -1].cpu().numpy() + 0.5)
