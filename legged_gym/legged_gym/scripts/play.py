@@ -51,37 +51,37 @@ class ActorWrapper(torch.nn.Module):
     def __init__(self, depth_encoder, actor, estimator=None):
         super().__init__()
 
-        self.depth_encoder = depth_encoder
-        self.hist_encoder = actor.history_encoder
-        self.actor = actor.actor_backbone 
+        self.depth_encoder = depth_encoder.eval()
+        self.hist_encoder = actor.history_encoder.eval()
+        self.actor = actor.actor_backbone.eval() 
 
         # base lin vel estimator
         self.estimator = estimator
 
-    def forward(self, depth, obs_proprio, obs_hist, hidden_states_in, base_lin_vel = None):
-        assert not (base_lin_vel is None and self.estimator is None), \
-                'You have not provided base_lin_vel although there is ' \
-                'no velocity estimator!'
-
+    def embed_depth(self, depth, obs_proprio, hidden_states_in):
+        obs_proprio[:, 6:8] = 0.
         depth_latent_and_yaw, hidden_states_out = self.depth_encoder(depth, obs_proprio, hidden_states_in=hidden_states_in)
+
+        return depth_latent_and_yaw, hidden_states_out
+
+    def forward(self, depth_latent_and_yaw, obs_proprio, obs_hist, obs_priv = None):
+        assert not (obs_priv is None and self.estimator is None), \
+                'You have not provided obs_priv although there is ' \
+                'no velocity estimator!'
         depth_latent = depth_latent_and_yaw[:, :-2]
         yaw = depth_latent_and_yaw[:, -2:]
-
         obs_proprio[:, 6:8] = 1.5*yaw
 
-        if base_lin_vel is None:
+        if obs_priv is None:
             obs_priv = self.estimator(obs_proprio)
-        else:
-            # obs_priv_explicit is 9D, first 3D are the base lin vel, the rest are 0
-            obs_priv = torch.zeros((obs.shape[0], 9), device=obs.device) 
-            obs_priv[:, :3] = base_lin_vel
 
         hist_latent = self.hist_encoder(obs_hist) # obs[:, -self.num_hist*self.num_prop:]
+        self.hist_latent = hist_latent
 
         backbone_input = torch.cat([obs_proprio, depth_latent, obs_priv, hist_latent], dim=1)
         backbone_output = self.actor(backbone_input)
 
-        return backbone_output, hidden_states_out
+        return backbone_output
     
 
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
@@ -177,18 +177,21 @@ def play(args):
                     )
 
     rnn_h = torch.zeros((1, env.num_envs, 512), device=env.device)
+    rnn_h2 = torch.zeros((1, env.num_envs, 512), device=env.device)
 
     for i in range(10*int(env.max_episode_length)):
-#        if infos["depth"] is not None:
-#            depth_buf = infos["depth"].clone()
-#
-#        obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
-#        obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
-#
-#        actions, hidden_states_out = actor_wrapper(depth_buf, obs_proprio, obs_hist, rnn_h) 
-#
-#        if infos["depth"] is not None:
-#            rnn_h[:] = hidden_states_out.detach().clone()
+        if infos["depth"] is not None:
+            depth_buf = infos["depth"].clone()
+
+        obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
+        obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
+
+        if infos["depth"] is not None:
+            w_dep_lat_yaw, hidden_states_out = actor_wrapper.embed_depth(depth_buf, obs_proprio, rnn_h) 
+            rnn_h[:] = hidden_states_out.detach().clone()
+
+        obs_priv = obs[:, env_cfg.env.n_proprio + env_cfg.env.n_scan : env_cfg.env.n_proprio + env_cfg.env.n_scan + env_cfg.env.n_priv]
+        wactions = actor_wrapper(w_dep_lat_yaw, obs_proprio, obs_hist, obs_priv = obs_priv)
 
         if args.use_jit:
             if env.cfg.depth.use_camera:
@@ -206,7 +209,11 @@ def play(args):
                 if infos["depth"] is not None:
                     obs_student = obs[:, :env.cfg.env.n_proprio].clone()
                     obs_student[:, 6:8] = 0
-                    depth_latent_and_yaw = depth_encoder(infos["depth"], obs_student)
+                    depth_latent_and_yaw, rnn_h2 = depth_encoder(infos["depth"], obs_student, hidden_states_in=rnn_h2)
+
+                    assert torch.allclose(depth_latent_and_yaw, w_dep_lat_yaw)
+                    print('All is fine!\n\n\n')
+
                     depth_latent = depth_latent_and_yaw[:, :-2]
                     yaw = depth_latent_and_yaw[:, -2:]
                 obs[:, 6:8] = 1.5*yaw
@@ -218,7 +225,8 @@ def play(args):
                 actions = ppo_runner.alg.depth_actor(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
             else:
                 actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
-            
+        
+        assert torch.allclose(actions, wactions)
         obs, _, rews, dones, infos = env.step(actions.detach())
         if args.web:
             web_viewer.render(fetch_results=True,

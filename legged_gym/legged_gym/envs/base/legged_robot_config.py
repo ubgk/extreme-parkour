@@ -80,7 +80,7 @@ class LeggedRobotCfg(BaseConfig):
 
         contact_buf_len = 100
 
-        next_goal_threshold = 0.2
+        next_goal_threshold = 0.3
         reach_goal_delay = 0.1
         num_future_goal_obs = 2
 

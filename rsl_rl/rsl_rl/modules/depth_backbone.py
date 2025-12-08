@@ -34,6 +34,7 @@ class RecurrentDepthBackbone(nn.Module):
         # depth_latent = self.base_backbone(depth_image)
 
         if hidden_states_in is None:
+            raise RuntimeError
             depth_latent, self.hidden_states = self.rnn(depth_latent[:, None, :], self.hidden_states)
         else:
             depth_latent, hidden_states_out = self.rnn(depth_latent[:, None, :], hidden_states_in)
@@ -41,6 +42,7 @@ class RecurrentDepthBackbone(nn.Module):
         depth_latent = self.output_mlp(depth_latent.squeeze(1))
        
         if hidden_states_in is None:
+            raise RuntimeError
             return depth_latent
         else:
             return depth_latent, hidden_states_out
