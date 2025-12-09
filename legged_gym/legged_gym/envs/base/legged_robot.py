@@ -166,10 +166,11 @@ class LeggedRobot(BaseTask):
 
     def process_depth_image(self, depth_image, env_id):
         # These operations are replicated on the hardware
-        depth_image = self.crop_depth_image(depth_image)
+        # depth_image shape is (H, W) -> (60, 106)
+        depth_image = self.crop_depth_image(depth_image) # (58, 98)
         depth_image += self.cfg.depth.dis_noise * 2 * (torch.rand(1)-0.5)[0]
         depth_image = torch.clip(depth_image, -self.cfg.depth.far_clip, -self.cfg.depth.near_clip)
-        depth_image = self.resize_transform(depth_image[None, :]).squeeze()
+        depth_image = self.resize_transform(depth_image[None, :]).squeeze() # (58, 87)
         depth_image = self.normalize_depth_image(depth_image)
         return depth_image
 
@@ -249,7 +250,7 @@ class LeggedRobot(BaseTask):
         self.roll, self.pitch, self.yaw = euler_from_quaternion(self.base_quat)
 
         contact = torch.norm(self.contact_forces[:, self.feet_indices], dim=-1) > 2.
-        self.contact_filt = torch.logical_or(contact, self.last_contacts)
+        self.contact_filt = contact # torch.logical_or(contact, self.last_contacts) 
         self.last_contacts = contact
 
         # self._update_jump_schedule()
@@ -605,7 +606,7 @@ class LeggedRobot(BaseTask):
         #pd controller
         actions_scaled = actions * self.cfg.control.action_scale
         control_type = self.cfg.control.control_type
-        if control_type=="P":
+        if control_type=="P": # True
             if not self.cfg.domain_rand.randomize_motor:  # TODO add strength to gain directly
                 torques = self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.d_gains*self.dof_vel
             else:
@@ -877,10 +878,10 @@ class LeggedRobot(BaseTask):
         if self.cfg.depth.use_camera:
             config = self.cfg.depth
             camera_props = gymapi.CameraProperties()
-            camera_props.width = self.cfg.depth.original[0]
-            camera_props.height = self.cfg.depth.original[1]
+            camera_props.width = self.cfg.depth.original[0] # 106
+            camera_props.height = self.cfg.depth.original[1] # 60
             camera_props.enable_tensors = True
-            camera_horizontal_fov = self.cfg.depth.horizontal_fov
+            camera_horizontal_fov = self.cfg.depth.horizontal_fov # 87 
             camera_props.horizontal_fov = camera_horizontal_fov
 
             camera_handle = self.gym.create_camera_sensor(env_handle, camera_props)

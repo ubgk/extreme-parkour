@@ -175,6 +175,10 @@ def play(args):
                                  estimator=ppo_runner.alg.estimator)
 
     rnn_h = torch.zeros((1, env.num_envs, 512), device=env.device)
+    
+    import onnxruntime as ort
+    depth_ort_session = ort.InferenceSession("relaxed_depth.onnx")
+    actor_ort_session = ort.InferenceSession("relaxed_actor.onnx")
 
     for i in range(10*int(env.max_episode_length)):
         if infos["depth"] is not None:
@@ -184,13 +188,30 @@ def play(args):
         obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
 
         if infos["depth"] is not None:
+            # depth_latent_and_yaw, hidden_states_out = depth_wrapper(depth_buf, obs_proprio, rnn_h)
+            depth_ort_inputs = {'depth': depth_buf[:1].cpu().numpy(),
+                                'obs_proprio': obs_proprio[:1].cpu().numpy(),
+                                'rnn_hidden_in': rnn_h[:, :1].cpu().numpy()}
+            depth_ort_outs = depth_ort_session.run(['depth_latent_and_yaw', 'rnn_hidden_out'], depth_ort_inputs)
+
             depth_latent_and_yaw, hidden_states_out = depth_wrapper(depth_buf, obs_proprio, rnn_h) 
+
+            assert np.allclose(depth_ort_outs[0], depth_latent_and_yaw[:1].detach().cpu().numpy(), atol=1e-3)
             rnn_h[:] = hidden_states_out.detach().clone()
+
             # torch.onnx.export(depth_wrapper, (depth_buf[:1], obs_proprio[:1], rnn_h[:, :1]), 'relaxed_depth.onnx', input_names=['depth', 'obs_proprio', 'rnn_hidden_in'], output_names=['depth_latent_and_yaw', 'rnn_hidden_out'])
 
         # obs_priv = obs[:, env_cfg.env.n_proprio + env_cfg.env.n_scan : env_cfg.env.n_proprio + env_cfg.env.n_scan + env_cfg.env.n_priv]
         actions = actor_wrapper(depth_latent_and_yaw, obs_proprio, obs_hist) #, obs_priv = obs_priv)
         # torch.onnx.export(actor_wrapper, (depth_latent_and_yaw[:1], obs_proprio[:1], obs_hist[:1]), 'relaxed_actor.onnx', input_names=['depth_latent_and_yaw', 'obs_proprio', 'obs_hist'], output_names=['actions'])
+
+        actor_ort_inputs = {'depth_latent_and_yaw': depth_ort_outs[0], # depth_latent_and_yaw[:1].cpu().detach().numpy(),
+                            'obs_proprio': obs_proprio[:1].cpu().detach().numpy(),
+                            'obs_hist': obs_hist[:1].cpu().detach().numpy()}
+
+        actor_ort_outs = actor_ort_session.run(['actions'], actor_ort_inputs)
+
+        assert np.allclose(actor_ort_outs[0], actions[:1].detach().cpu().numpy(), atol=1e-3)
 
         obs, _, rews, dones, infos = env.step(actions.detach())
         if args.web:
