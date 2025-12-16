@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
 #
@@ -59,13 +59,13 @@ class DepthWrapper(torch.nn.Module):
         depth_latent_and_yaw, hidden_states_out = self.depth_encoder(depth, obs_proprio, hidden_states_in=hidden_states_in)
 
         return depth_latent_and_yaw, hidden_states_out
- 
+
 class ActorWrapper(torch.nn.Module):
     def __init__(self, actor, estimator=None):
         super().__init__()
 
         self.hist_encoder = actor.history_encoder.eval()
-        self.actor = actor.actor_backbone.eval() 
+        self.actor = actor.actor_backbone.eval()
 
         # base lin vel estimator
         self.estimator = estimator.eval()
@@ -88,7 +88,22 @@ class ActorWrapper(torch.nn.Module):
         backbone_output = self.actor(backbone_input)
 
         return backbone_output
-    
+
+class DepthActorWrapper(torch.nn.Module):
+    """ Branchless wrapper module for depth encoder + actor network. """
+    def __init__(self, depth_wrapper, actor_wrapper, estimator=None):
+        super().__init__()
+
+        self.depth_wrapper = depth_wrapper
+        self.actor_wrapper = actor_wrapper
+
+    def forward(self, depth, depth_latent_and_yaw, update_depth, obs_proprio, obs_hist, hidden_states_in, obs_priv = None):
+        new_depth_latent_and_yaw, hidden_states_out = self.depth_wrapper(depth, obs_proprio, hidden_states_in)
+
+        depth_latent_and_yaw = update_depth * new_depth_latent_and_yaw + (1 - update_depth) * depth_latent_and_yaw
+        actions = self.actor_wrapper(depth_latent_and_yaw, obs_proprio, obs_hist, obs_priv)
+
+        return actions, hidden_states_out, depth_latent_and_yaw
 
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     if checkpoint==-1:
@@ -115,14 +130,14 @@ def play(args):
     env_cfg.terrain.num_rows = 5
     env_cfg.terrain.num_cols = 5
     env_cfg.terrain.height = [0.02, 0.02]
-    env_cfg.terrain.terrain_dict = {"smooth slope": 0., 
+    env_cfg.terrain.terrain_dict = {"smooth slope": 0.,
                                     "rough slope up": 0.0,
                                     "rough slope down": 0.0,
-                                    "rough stairs up": 0., 
-                                    "rough stairs down": 0., 
-                                    "discrete": 0., 
+                                    "rough stairs up": 0.,
+                                    "rough stairs down": 0.,
+                                    "discrete": 0.,
                                     "stepping stones": 0.0,
-                                    "gaps": 0., 
+                                    "gaps": 0.,
                                     "smooth flat": 0,
                                     "pit": 0.0,
                                     "wall": 0.0,
@@ -133,13 +148,13 @@ def play(args):
                                     "parkour_hurdle": 0.2,
                                     "parkour_flat": 0.,
                                     "parkour_step": 0.2,
-                                    "parkour_gap": 0.2, 
+                                    "parkour_gap": 0.2,
                                     "demo": 0.2}
-    
+
     env_cfg.terrain.terrain_proportions = list(env_cfg.terrain.terrain_dict.values())
     env_cfg.terrain.curriculum = False
     env_cfg.terrain.max_difficulty = True
-    
+
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
     env_cfg.domain_rand.randomize_friction = True
@@ -160,7 +175,7 @@ def play(args):
     # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
-    
+
     estimator = ppo_runner.get_estimator_inference_policy(device=env.device)
     if env.cfg.depth.use_camera:
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
@@ -171,14 +186,22 @@ def play(args):
 
 
     depth_wrapper = DepthWrapper(depth_encoder)
-    actor_wrapper = ActorWrapper(ppo_runner.alg.depth_actor, 
+    actor_wrapper = ActorWrapper(ppo_runner.alg.depth_actor,
                                  estimator=ppo_runner.alg.estimator)
 
+    depth_actor_wrapper = DepthActorWrapper(depth_wrapper, actor_wrapper)
     rnn_h = torch.zeros((1, env.num_envs, 512), device=env.device)
-    
-    import onnxruntime as ort
-    depth_ort_session = ort.InferenceSession("relaxed_depth.onnx")
-    actor_ort_session = ort.InferenceSession("relaxed_actor.onnx")
+
+    # import onnxruntime as ort
+    # depth_ort_session = ort.InferenceSession("relaxed_depth.onnx")
+    # actor_ort_session = ort.InferenceSession("relaxed_actor.onnx")
+
+    # obs_container = torch.zeros((1000, 53), device=env.device)
+    # obs_hist_container = torch.zeros((1000, 10, 53), device=env.device)
+    # actions_container = torch.zeros((1000, 12), device=env.device)
+    # depth_container = torch.zeros((200, 58, 87), device=env.device)
+
+    depth_latent_and_yaw = torch.zeros((env.num_envs, 32 + 2), device=env.device)
 
     for i in range(10*int(env.max_episode_length)):
         if infos["depth"] is not None:
@@ -188,30 +211,41 @@ def play(args):
         obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
 
         if infos["depth"] is not None:
-            # depth_latent_and_yaw, hidden_states_out = depth_wrapper(depth_buf, obs_proprio, rnn_h)
-            depth_ort_inputs = {'depth': depth_buf[:1].cpu().numpy(),
-                                'obs_proprio': obs_proprio[:1].cpu().numpy(),
-                                'rnn_hidden_in': rnn_h[:, :1].cpu().numpy()}
-            depth_ort_outs = depth_ort_session.run(['depth_latent_and_yaw', 'rnn_hidden_out'], depth_ort_inputs)
+             # depth_latent_and_yaw, hidden_states_out = depth_wrapper(depth_buf, obs_proprio, rnn_h)
+             # depth_ort_inputs = {'depth': depth_buf[:1].cpu().numpy(),
+             #                     'obs_proprio': obs_proprio[:1].cpu().numpy(),
+             #                     'rnn_hidden_in': rnn_h[:, :1].cpu().numpy()}
+             # depth_ort_outs = depth_ort_session.run(['depth_latent_and_yaw', 'rnn_hidden_out'], depth_ort_inputs)
 
-            depth_latent_and_yaw, hidden_states_out = depth_wrapper(depth_buf, obs_proprio, rnn_h) 
-
-            assert np.allclose(depth_ort_outs[0], depth_latent_and_yaw[:1].detach().cpu().numpy(), atol=1e-3)
+            update_depth = 1.0
+            actions, hidden_states_out, depth_latent_and_yaw = depth_actor_wrapper(depth_buf, depth_latent_and_yaw, update_depth, obs_proprio, obs_hist, rnn_h)
+            # assert np.allclose(depth_ort_outs[0], depth_latent_and_yaw[:1].detach().cpu().numpy(), atol=1e-3)
             rnn_h[:] = hidden_states_out.detach().clone()
+
+        else:
+            update_depth = 0.0
+            obs_proprio[:, 6:8] = depth_latent_and_yaw[:, -2:]
+            actions, _, _ = depth_actor_wrapper(depth_buf, depth_latent_and_yaw, update_depth, obs_proprio, obs_hist, rnn_h)
+            # depth_container[i //5, :] = depth_buf[7]
 
             # torch.onnx.export(depth_wrapper, (depth_buf[:1], obs_proprio[:1], rnn_h[:, :1]), 'relaxed_depth.onnx', input_names=['depth', 'obs_proprio', 'rnn_hidden_in'], output_names=['depth_latent_and_yaw', 'rnn_hidden_out'])
 
         # obs_priv = obs[:, env_cfg.env.n_proprio + env_cfg.env.n_scan : env_cfg.env.n_proprio + env_cfg.env.n_scan + env_cfg.env.n_priv]
-        actions = actor_wrapper(depth_latent_and_yaw, obs_proprio, obs_hist) #, obs_priv = obs_priv)
+        # actions = actor_wrapper(depth_latent_and_yaw, obs_proprio, obs_hist) #, obs_priv = obs_priv)
+
+        # obs_container[i, :] = obs_proprio[7]
+        # obs_hist_container[i, :] = obs_hist[7].view(10, 53)
+        # actions_container[i, :] = actions[7]
+
         # torch.onnx.export(actor_wrapper, (depth_latent_and_yaw[:1], obs_proprio[:1], obs_hist[:1]), 'relaxed_actor.onnx', input_names=['depth_latent_and_yaw', 'obs_proprio', 'obs_hist'], output_names=['actions'])
 
-        actor_ort_inputs = {'depth_latent_and_yaw': depth_ort_outs[0], # depth_latent_and_yaw[:1].cpu().detach().numpy(),
-                            'obs_proprio': obs_proprio[:1].cpu().detach().numpy(),
-                            'obs_hist': obs_hist[:1].cpu().detach().numpy()}
+        # actor_ort_inputs = {'depth_latent_and_yaw': depth_ort_outs[0], # depth_latent_and_yaw[:1].cpu().detach().numpy(),
+        #                     'obs_proprio': obs_proprio[:1].cpu().detach().numpy(),
+        #                     'obs_hist': obs_hist[:1].cpu().detach().numpy()}
 
-        actor_ort_outs = actor_ort_session.run(['actions'], actor_ort_inputs)
+        # actor_ort_outs = actor_ort_session.run(['actions'], actor_ort_inputs)
 
-        assert np.allclose(actor_ort_outs[0], actions[:1].detach().cpu().numpy(), atol=1e-3)
+        # assert np.allclose(actor_ort_outs[0], actions[:1].detach().cpu().numpy(), atol=1e-3)
 
         obs, _, rews, dones, infos = env.step(actions.detach())
         if args.web:
@@ -219,12 +253,13 @@ def play(args):
                         step_graphics=True,
                         render_all_camera_sensors=True,
                         wait_for_page_load=True)
-        print("time:", env.episode_length_buf[env.lookat_id].item() / 50, 
+        print("time:", env.episode_length_buf[env.lookat_id].item() / 50,
               "cmd vx", env.commands[env.lookat_id, 0].item(),
               "actual vx", env.base_lin_vel[env.lookat_id, 0].item(), )
-        
+
         id = env.lookat_id
-        
+        # np.savez('isaac_flat.npz', obs=obs_container.detach().cpu().numpy(), obs_hist=obs_hist_container.detach().cpu().numpy(), depth=depth_container.detach().cpu().numpy(), actions=actions_container.detach().cpu().numpy())
+
 
 if __name__ == '__main__':
     EXPORT_POLICY = False
