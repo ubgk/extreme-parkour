@@ -185,26 +185,14 @@ def play(args):
     actions = torch.zeros(env.num_envs, 12, device=env.device, requires_grad=False)
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
+    
 
+    hidden_states = np.zeros((1, 1, 512), dtype=np.float32)
+    depth_latent = np.zeros((1, 32), dtype=np.float32)
+    yaw = np.zeros((1, 2), dtype=np.float32)
 
-    depth_wrapper = DepthWrapper(depth_encoder)
-    actor_wrapper = ActorWrapper(ppo_runner.alg.depth_actor,
-                                 estimator=ppo_runner.alg.estimator)
-
-    depth_actor_wrapper = DepthActorWrapper(depth_wrapper, actor_wrapper)
-    hidden_states = torch.zeros((1, env.num_envs, 512), device=env.device)
-
-    # import onnxruntime as ort
-    # depth_ort_session = ort.InferenceSession("relaxed_depth.onnx")
-    # actor_ort_session = ort.InferenceSession("relaxed_actor.onnx")
-
-    # obs_container = torch.zeros((1000, 53), device=env.device)
-    # obs_hist_container = torch.zeros((1000, 10, 53), device=env.device)
-    # actions_container = torch.zeros((1000, 12), device=env.device)
-    # depth_container = torch.zeros((200, 58, 87), device=env.device)
-
-    depth_latent = torch.zeros((env.num_envs, 32), device=env.device)
-    yaw = torch.zeros((env.num_envs, 2), device=env.device)
+    import onnxruntime as ort
+    session = ort.InferenceSession("extreme_branchless_v3.onnx")
 
     for i in range(10*int(env.max_episode_length)):
         if infos["depth"] is not None:
@@ -213,42 +201,30 @@ def play(args):
         obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
         obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
 
-        obs_proprio[:, 6:8] = yaw 
+        obs_proprio[:, 6:8] = torch.Tensor(yaw) 
 
         if infos["depth"] is not None:
-             # depth_latent_and_yaw, hidden_states_out = depth_wrapper(depth_buf, obs_proprio, rnn_h)
-             # depth_ort_inputs = {'depth': depth_buf[:1].cpu().numpy(),
-             #                     'obs_proprio': obs_proprio[:1].cpu().numpy(),
-             #                     'rnn_hidden_in': rnn_h[:, :1].cpu().numpy()}
-             # depth_ort_outs = depth_ort_session.run(['depth_latent_and_yaw', 'rnn_hidden_out'], depth_ort_inputs)
-
             update_depth = 1.0
-            actions, hidden_states, depth_latent, yaw = depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states)
-            # assert np.allclose(depth_ort_outs[0], depth_latent_and_yaw[:1].detach().cpu().numpy(), atol=1e-3)
-
         else:
             update_depth = 0.0
-            actions, _, _, _ = depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states)
-            # depth_container[i //5, :] = depth_buf[7]
+    
+        eid = env.lookat_id
+        ort_inputs = {'depth': depth_buf[eid:eid+1].cpu().numpy(),
+                        'depth_latent_in': depth_latent,
+                        'update_depth': np.array([update_depth], dtype=np.float32),
+                        'obs_proprio': obs_proprio[eid:eid+1].cpu().numpy(),
+                        'obs_hist': obs_hist[eid:eid+1].cpu().numpy(),
+                        'rnn_hidden_in': hidden_states
+                      }
+        ort_outs = session.run(['actions', 'rnn_hidden_out', 'depth_latent_out', 'yaw_out'], ort_inputs)
 
-            # torch.onnx.export(depth_wrapper, (depth_buf[:1], obs_proprio[:1], rnn_h[:, :1]), 'relaxed_depth.onnx', input_names=['depth', 'obs_proprio', 'rnn_hidden_in'], output_names=['depth_latent_and_yaw', 'rnn_hidden_out'])
-
-        # obs_priv = obs[:, env_cfg.env.n_proprio + env_cfg.env.n_scan : env_cfg.env.n_proprio + env_cfg.env.n_scan + env_cfg.env.n_priv]
-        # actions = actor_wrapper(depth_latent_and_yaw, obs_proprio, obs_hist) #, obs_priv = obs_priv)
-
-        # obs_container[i, :] = obs_proprio[7]
-        # obs_hist_container[i, :] = obs_hist[7].view(10, 53)
-        # actions_container[i, :] = actions[7]
-
-        # torch.onnx.export(actor_wrapper, (depth_latent_and_yaw[:1], obs_proprio[:1], obs_hist[:1]), 'relaxed_actor.onnx', input_names=['depth_latent_and_yaw', 'obs_proprio', 'obs_hist'], output_names=['actions'])
-
-        # actor_ort_inputs = {'depth_latent_and_yaw': depth_ort_outs[0], # depth_latent_and_yaw[:1].cpu().detach().numpy(),
-        #                     'obs_proprio': obs_proprio[:1].cpu().detach().numpy(),
-        #                     'obs_hist': obs_hist[:1].cpu().detach().numpy()}
-
-        # actor_ort_outs = actor_ort_session.run(['actions'], actor_ort_inputs)
-
-        # assert np.allclose(actor_ort_outs[0], actions[:1].detach().cpu().numpy(), atol=1e-3)
+        if infos["depth"] is not None:
+            hidden_states = ort_outs[1]
+            depth_latent = ort_outs[2]
+            yaw = ort_outs[3]
+        
+        actions *= 0.
+        actions[eid:eid+1] = torch.tensor(ort_outs[0], device=env.device)
 
         obs, _, rews, dones, infos = env.step(actions.detach())
         if args.web:
@@ -261,7 +237,6 @@ def play(args):
               "actual vx", env.base_lin_vel[env.lookat_id, 0].item(), )
 
         id = env.lookat_id
-        # np.savez('isaac_flat.npz', obs=obs_container.detach().cpu().numpy(), obs_hist=obs_hist_container.detach().cpu().numpy(), depth=depth_container.detach().cpu().numpy(), actions=actions_container.detach().cpu().numpy())
 
 
 if __name__ == '__main__':
