@@ -57,8 +57,10 @@ class DepthWrapper(torch.nn.Module):
     def forward(self, depth, obs_proprio, hidden_states_in):
         obs_proprio[:, 6:8] = 0.
         depth_latent_and_yaw, hidden_states_out = self.depth_encoder(depth, obs_proprio, hidden_states_in=hidden_states_in)
+        depth_latent = depth_latent_and_yaw[:, :-2]
+        yaw = depth_latent_and_yaw[:, -2:]
 
-        return depth_latent_and_yaw, hidden_states_out
+        return depth_latent, yaw, hidden_states_out
 
 class ActorWrapper(torch.nn.Module):
     def __init__(self, actor, estimator=None):
@@ -70,13 +72,13 @@ class ActorWrapper(torch.nn.Module):
         # base lin vel estimator
         self.estimator = estimator.eval()
 
-    def forward(self, depth_latent_and_yaw, obs_proprio, obs_hist, obs_priv = None):
+    def forward(self, depth_latent, obs_proprio, obs_hist, obs_priv = None):
         assert not (obs_priv is None and self.estimator is None), \
                 'You have not provided obs_priv although there is ' \
                 'no velocity estimator!'
-        depth_latent = depth_latent_and_yaw[:, :-2]
-        yaw = depth_latent_and_yaw[:, -2:]
-        obs_proprio[:, 6:8] = 1.5*yaw
+        # depth_latent = depth_latent_and_yaw[:, :-2]
+        # yaw = depth_latent_and_yaw[:, -2:]
+        # obs_proprio[:, 6:8] = 1.5*yaw
 
         if obs_priv is None:
             obs_priv = self.estimator(obs_proprio)
@@ -97,13 +99,13 @@ class DepthActorWrapper(torch.nn.Module):
         self.depth_wrapper = depth_wrapper
         self.actor_wrapper = actor_wrapper
 
-    def forward(self, depth, depth_latent_and_yaw, update_depth, obs_proprio, obs_hist, hidden_states_in, obs_priv = None):
-        new_depth_latent_and_yaw, hidden_states_out = self.depth_wrapper(depth, obs_proprio, hidden_states_in)
+    def forward(self, depth, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states_in, obs_priv = None):
+        new_depth_latent, new_yaw, hidden_states_out = self.depth_wrapper(depth, obs_proprio, hidden_states_in)
 
-        depth_latent_and_yaw = update_depth * new_depth_latent_and_yaw + (1 - update_depth) * depth_latent_and_yaw
-        actions = self.actor_wrapper(depth_latent_and_yaw, obs_proprio, obs_hist, obs_priv)
+        depth_latent = (update_depth * new_depth_latent) + (1 - update_depth) * depth_latent
+        actions = self.actor_wrapper(depth_latent, obs_proprio, obs_hist, obs_priv)
 
-        return actions, hidden_states_out, depth_latent_and_yaw
+        return actions, hidden_states_out, depth_latent, new_yaw
 
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     if checkpoint==-1:
@@ -190,7 +192,7 @@ def play(args):
                                  estimator=ppo_runner.alg.estimator)
 
     depth_actor_wrapper = DepthActorWrapper(depth_wrapper, actor_wrapper)
-    rnn_h = torch.zeros((1, env.num_envs, 512), device=env.device)
+    hidden_states = torch.zeros((1, env.num_envs, 512), device=env.device)
 
     # import onnxruntime as ort
     # depth_ort_session = ort.InferenceSession("relaxed_depth.onnx")
@@ -201,7 +203,8 @@ def play(args):
     # actions_container = torch.zeros((1000, 12), device=env.device)
     # depth_container = torch.zeros((200, 58, 87), device=env.device)
 
-    depth_latent_and_yaw = torch.zeros((env.num_envs, 32 + 2), device=env.device)
+    depth_latent = torch.zeros((env.num_envs, 32), device=env.device)
+    yaw = torch.zeros((env.num_envs, 2), device=env.device)
 
     for i in range(10*int(env.max_episode_length)):
         if infos["depth"] is not None:
@@ -209,6 +212,8 @@ def play(args):
 
         obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
         obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
+
+        obs_proprio[:, 6:8] = yaw 
 
         if infos["depth"] is not None:
              # depth_latent_and_yaw, hidden_states_out = depth_wrapper(depth_buf, obs_proprio, rnn_h)
@@ -218,14 +223,12 @@ def play(args):
              # depth_ort_outs = depth_ort_session.run(['depth_latent_and_yaw', 'rnn_hidden_out'], depth_ort_inputs)
 
             update_depth = 1.0
-            actions, hidden_states_out, depth_latent_and_yaw = depth_actor_wrapper(depth_buf, depth_latent_and_yaw, update_depth, obs_proprio, obs_hist, rnn_h)
+            actions, hidden_states, depth_latent, yaw = depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states)
             # assert np.allclose(depth_ort_outs[0], depth_latent_and_yaw[:1].detach().cpu().numpy(), atol=1e-3)
-            rnn_h[:] = hidden_states_out.detach().clone()
 
         else:
             update_depth = 0.0
-            obs_proprio[:, 6:8] = depth_latent_and_yaw[:, -2:]
-            actions, _, _ = depth_actor_wrapper(depth_buf, depth_latent_and_yaw, update_depth, obs_proprio, obs_hist, rnn_h)
+            actions, _, _, _ = depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states)
             # depth_container[i //5, :] = depth_buf[7]
 
             # torch.onnx.export(depth_wrapper, (depth_buf[:1], obs_proprio[:1], rnn_h[:, :1]), 'relaxed_depth.onnx', input_names=['depth', 'obs_proprio', 'rnn_hidden_in'], output_names=['depth_latent_and_yaw', 'rnn_hidden_out'])
