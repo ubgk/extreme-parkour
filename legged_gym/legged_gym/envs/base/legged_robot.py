@@ -236,6 +236,8 @@ class LeggedRobot(BaseTask):
         self.common_step_counter += 1
 
         # prepare quantities
+        self.dof_vel = 0.5 * (self.dof_vel + (self.dof_pos - self.last_dof_pos) / self.dt)
+
         self.base_quat[:] = self.root_states[:, 3:7]
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
@@ -266,6 +268,7 @@ class LeggedRobot(BaseTask):
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
         self.last_actions[:] = self.actions[:]
+        self.last_dof_pos[:] = self.dof_pos[:]
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_torques[:] = self.torques[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
@@ -333,6 +336,7 @@ class LeggedRobot(BaseTask):
 
         # reset buffers
         self.last_actions[env_ids] = 0.
+        self.last_dof_pos[env_ids] = 0.
         self.last_dof_vel[env_ids] = 0.
         self.last_torques[env_ids] = 0.
         self.last_root_vel[:] = 0.
@@ -732,6 +736,7 @@ class LeggedRobot(BaseTask):
         self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.last_dof_pos = torch.zeros_like(self.dof_pos)
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
         self.last_torques = torch.zeros_like(self.torques)
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
