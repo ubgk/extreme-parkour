@@ -11,12 +11,14 @@ class RecurrentDepthBackbone(nn.Module):
         self.base_backbone = base_backbone
         if env_cfg == None:
             self.combination_mlp = nn.Sequential(
+                                    nn.BatchNorm1d(32 + 53, momentum=0.1, affine=True),
                                     nn.Linear(32 + 53, 128),
                                     activation,
                                     nn.Linear(128, 32)
                                 )
         else:
             self.combination_mlp = nn.Sequential(
+                                        nn.BatchNorm1d(32 + env_cfg.env.n_proprio, momentum=0.1, affine=True),
                                         nn.Linear(32 + env_cfg.env.n_proprio, 128),
                                         activation,
                                         nn.Linear(128, 32)
@@ -46,6 +48,7 @@ class StackDepthEncoder(nn.Module):
         activation = nn.ELU()
         self.base_backbone = base_backbone
         self.combination_mlp = nn.Sequential(
+                                    nn.BatchNorm1d(32 + env_cfg.env.n_proprio, momentum=0.1, affine=True),
                                     nn.Linear(32 + env_cfg.env.n_proprio, 128),
                                     activation,
                                     nn.Linear(128, 32)

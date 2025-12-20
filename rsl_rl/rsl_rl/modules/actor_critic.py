@@ -49,6 +49,7 @@ class StateHistoryEncoder(nn.Module):
         # last_activation = nn.ELU()
 
         self.encoder = nn.Sequential(
+                nn.BatchNorm1d(input_size, momentum=0.1, affine=True),
                 nn.Linear(input_size, 3 * channel_size), self.activation_fn,
                 )
 
@@ -109,6 +110,7 @@ class Actor(nn.Module):
 
         if len(priv_encoder_dims) > 0:
                     priv_encoder_layers = []
+                    priv_encoder_layers.append(nn.BatchNorm1d(num_priv_latent, momentum=0.1, affine=True))
                     priv_encoder_layers.append(nn.Linear(num_priv_latent, priv_encoder_dims[0]))
                     priv_encoder_layers.append(activation)
                     for l in range(len(priv_encoder_dims) - 1):
@@ -138,13 +140,10 @@ class Actor(nn.Module):
         else:
             self.scan_encoder = nn.Identity()
             self.scan_encoder_output_dim = num_scan
-        
-        actor_layers = []
-        actor_layers.append(nn.Linear(num_prop+
-                                      self.scan_encoder_output_dim+
-                                      num_priv_explicit+
-                                      priv_encoder_output_dim, 
-                                      actor_hidden_dims[0]))
+ 
+        num_actor_input = num_prop + self.scan_encoder_output_dim + num_priv_explicit + priv_encoder_output_dim
+        actor_layers = [nn.BatchNorm1d(num_actor_input, momentum=0.1, affine=True)]
+        actor_layers.append(nn.Linear(num_actor_input, actor_hidden_dims[0]))
         actor_layers.append(activation)
         for l in range(len(actor_hidden_dims)):
             if l == len(actor_hidden_dims) - 1:
@@ -155,6 +154,7 @@ class Actor(nn.Module):
         if tanh_encoder_output:
             actor_layers.append(nn.Tanh())
         self.actor_backbone = nn.Sequential(*actor_layers)
+
 
     def forward(self, obs, hist_encoding: bool, eval=False, scandots_latent=None):
         if not eval:
