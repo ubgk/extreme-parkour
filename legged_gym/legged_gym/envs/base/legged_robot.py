@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
 #
@@ -64,15 +64,15 @@ def euler_from_quaternion(quat_angle):
         t0 = +2.0 * (w * x + y * z)
         t1 = +1.0 - 2.0 * (x * x + y * y)
         roll_x = torch.atan2(t0, t1)
-     
+
         t2 = +2.0 * (w * y - z * x)
         t2 = torch.clip(t2, -1, 1)
         pitch_y = torch.asin(t2)
-     
+
         t3 = +2.0 * (w * z + x * y)
         t4 = +1.0 - 2.0 * (y * y + z * z)
         yaw_z = torch.atan2(t3, t4)
-     
+
         return roll_x, pitch_y, yaw_z # in radians
 
 class LeggedRobot(BaseTask):
@@ -97,9 +97,9 @@ class LeggedRobot(BaseTask):
         self._parse_cfg(self.cfg)
         super().__init__(self.cfg, sim_params, physics_engine, sim_device, headless)
 
-        self.resize_transform = torchvision.transforms.Resize((self.cfg.depth.resized[1], self.cfg.depth.resized[0]), 
+        self.resize_transform = torchvision.transforms.Resize((self.cfg.depth.resized[1], self.cfg.depth.resized[0]),
                                                               interpolation=torchvision.transforms.InterpolationMode.BICUBIC)
-        
+
         if not self.headless:
             self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
         self._init_buffers()
@@ -142,6 +142,7 @@ class LeggedRobot(BaseTask):
             self.gym.simulate(self.sim)
             self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
+
         self.post_physics_step()
 
         clip_obs = self.cfg.normalization.clip_observations
@@ -157,12 +158,12 @@ class LeggedRobot(BaseTask):
 
     def get_history_observations(self):
         return self.obs_history_buf
-    
+
     def normalize_depth_image(self, depth_image):
         depth_image = depth_image * -1
         depth_image = (depth_image - self.cfg.depth.near_clip) / (self.cfg.depth.far_clip - self.cfg.depth.near_clip)  - 0.5
         return depth_image
-    
+
     def process_depth_image(self, depth_image, env_id):
         # These operations are replicated on the hardware
         depth_image = self.crop_depth_image(depth_image)
@@ -187,11 +188,11 @@ class LeggedRobot(BaseTask):
         self.gym.start_access_image_tensors(self.sim)
 
         for i in range(self.num_envs):
-            depth_image_ = self.gym.get_camera_image_gpu_tensor(self.sim, 
-                                                                self.envs[i], 
+            depth_image_ = self.gym.get_camera_image_gpu_tensor(self.sim,
+                                                                self.envs[i],
                                                                 self.cam_handles[i],
                                                                 gymapi.IMAGE_DEPTH)
-            
+
             depth_image = gymtorch.wrap_tensor(depth_image_)
             depth_image = self.process_depth_image(depth_image, i)
 
@@ -224,7 +225,7 @@ class LeggedRobot(BaseTask):
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
-            calls self._post_physics_step_callback() for common computations 
+            calls self._post_physics_step_callback() for common computations
             calls self._draw_debug_vis() if needed
         """
         self.gym.refresh_actor_root_state_tensor(self.sim)
@@ -235,8 +236,9 @@ class LeggedRobot(BaseTask):
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
-        # prepare quantities
-        self.dof_vel = 0.5 * (self.dof_vel + (self.dof_pos - self.last_dof_pos) / self.dt)
+        # fd for joint velocities
+        self.dof_vel_fd = (self.dof_pos - self.last_dof_pos) / (self.dt)
+        self.last_dof_pos[:] = self.dof_pos[:]
 
         self.base_quat[:] = self.root_states[:, 3:7]
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
@@ -247,9 +249,9 @@ class LeggedRobot(BaseTask):
         self.roll, self.pitch, self.yaw = euler_from_quaternion(self.base_quat)
 
         contact = torch.norm(self.contact_forces[:, self.feet_indices], dim=-1) > 2.
-        self.contact_filt = torch.logical_or(contact, self.last_contacts) 
+        self.contact_filt = torch.logical_or(contact, self.last_contacts)
         self.last_contacts = contact
-        
+
         # self._update_jump_schedule()
         self._update_goals()
         self._post_physics_step_callback()
@@ -268,7 +270,6 @@ class LeggedRobot(BaseTask):
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
         self.last_actions[:] = self.actions[:]
-        self.last_dof_pos[:] = self.dof_pos[:]
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_torques[:] = self.torques[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
@@ -363,7 +364,7 @@ class LeggedRobot(BaseTask):
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
-        
+
     def compute_reward(self):
         """ Compute rewards
             Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
@@ -377,33 +378,33 @@ class LeggedRobot(BaseTask):
             self.episode_sums[name] += rew
         if self.cfg.rewards.only_positive_rewards:
             self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
-        
+
         # add termination reward after clipping
         if "termination" in self.reward_scales:
             rew = self._reward_termination() * self.reward_scales["termination"]
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
-    
+
     def compute_observations(self):
-        """ 
+        """
         Computes observations
         """
         imu_obs = torch.stack((self.roll, self.pitch), dim=1)
         if self.global_counter % 5 == 0:
             self.delta_yaw = self.target_yaw - self.yaw
             self.delta_next_yaw = self.next_target_yaw - self.yaw
-        obs_buf = torch.cat((#skill_vector, 
+        obs_buf = torch.cat((#skill_vector,
                             self.base_ang_vel  * self.obs_scales.ang_vel,   #[1,3]
                             imu_obs,    #[1,2]
-                            0*self.delta_yaw[:, None], 
+                            0*self.delta_yaw[:, None],
                             self.delta_yaw[:, None],
                             self.delta_next_yaw[:, None],
-                            0*self.commands[:, 0:2], 
+                            0*self.commands[:, 0:2],
                             self.commands[:, 0:1],  #[1,1]
-                            (self.env_class != 17).float()[:, None], 
+                            (self.env_class != 17).float()[:, None],
                             (self.env_class == 17).float()[:, None],
                             self.reindex((self.dof_pos - self.default_dof_pos_all) * self.obs_scales.dof_pos),
-                            self.reindex(self.dof_vel * self.obs_scales.dof_vel),
+                            self.reindex(self.dof_vel_fd * self.obs_scales.dof_vel),
                             self.reindex(self.action_history_buf[:, -1]),
                             self.reindex_feet(self.contact_filt.float()-0.5),
                             ),dim=-1)
@@ -413,7 +414,7 @@ class LeggedRobot(BaseTask):
         priv_latent = torch.cat((
             self.mass_params_tensor,
             self.friction_coeffs_tensor,
-            self.motor_strength[0] - 1, 
+            self.motor_strength[0] - 1,
             self.motor_strength[1] - 1
         ), dim=-1)
         if self.cfg.terrain.measure_heights:
@@ -423,7 +424,7 @@ class LeggedRobot(BaseTask):
             self.obs_buf = torch.cat([obs_buf, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
         obs_buf[:, 6:8] = 0  # mask yaw in proprioceptive history
         self.obs_history_buf = torch.where(
-            (self.episode_length_buf <= 1)[:, None, None], 
+            (self.episode_length_buf <= 1)[:, None, None],
             torch.stack([obs_buf] * self.cfg.env.history_len, dim=1),
             torch.cat([
                 self.obs_history_buf[:, 1:],
@@ -432,15 +433,17 @@ class LeggedRobot(BaseTask):
         )
 
         self.contact_buf = torch.where(
-            (self.episode_length_buf <= 1)[:, None, None], 
+            (self.episode_length_buf <= 1)[:, None, None],
             torch.stack([self.contact_filt.float()] * self.cfg.env.contact_buf_len, dim=1),
             torch.cat([
                 self.contact_buf[:, 1:],
                 self.contact_filt.float().unsqueeze(1)
             ], dim=1)
         )
-        
-        
+
+        self.privileged_obs_buf = torch.cat([self.obs_buf, self.obs_scales.dof_vel * self.dof_vel], dim=-1)
+
+
     def get_noisy_measurement(self, x, scale):
         if self.cfg.noise.add_noise:
             x = x + (2.0 * torch.rand_like(x) - 1) * scale * self.cfg.noise.noise_level
@@ -547,12 +550,12 @@ class LeggedRobot(BaseTask):
             rand_com = np.zeros(3)
         mass_params = np.concatenate([rand_mass, rand_com])
         return props, mass_params
-    
+
     def _post_physics_step_callback(self):
         """ Callback called before computing terminations, rewards, and observations
             Default behaviour: Compute ang vel command based on target and heading, compute measured terrain heights and randomly push robots
         """
-        # 
+        #
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
 
@@ -561,13 +564,13 @@ class LeggedRobot(BaseTask):
             heading = torch.atan2(forward[:, 1], forward[:, 0])
             self.commands[:, 2] = torch.clip(0.8*wrap_to_pi(self.commands[:, 3] - heading), -1., 1.)
             self.commands[:, 2] *= torch.abs(self.commands[:, 2]) > self.cfg.commands.ang_vel_clip
-        
+
         if self.cfg.terrain.measure_heights:
             if self.global_counter % self.cfg.depth.update_interval == 0:
                 self.measured_heights = self._get_heights()
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
-        
+
     def _gather_cur_goals(self, future=0):
         return self.env_goals.gather(1, (self.cur_goal_idx[:, None, None]+future).expand(-1, -1, self.env_goals.shape[-1])).squeeze(1)
 
@@ -606,7 +609,7 @@ class LeggedRobot(BaseTask):
                 torques = self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.d_gains*self.dof_vel
             else:
                 torques = self.motor_strength[0] * self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.motor_strength[1] * self.d_gains*self.dof_vel
-                
+
         elif control_type=="V":
             torques = self.p_gains*(actions_scaled - self.dof_vel) - self.d_gains*(self.dof_vel - self.last_dof_vel)/self.sim_params.dt
         elif control_type=="T":
@@ -649,11 +652,11 @@ class LeggedRobot(BaseTask):
                     rand_pitch = self.cfg.env.rand_pitch_range*torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
                 else:
                     rand_pitch = torch.zeros(len(env_ids), device=self.device)
-                quat = quat_from_euler_xyz(0*rand_yaw, rand_pitch, rand_yaw) 
-                self.root_states[env_ids, 3:7] = quat[:, :]  
+                quat = quat_from_euler_xyz(0*rand_yaw, rand_pitch, rand_yaw)
+                self.root_states[env_ids, 3:7] = quat[:, :]
             if self.cfg.env.randomize_start_y:
                 self.root_states[env_ids, 1] += self.cfg.env.rand_y_range * torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
-            
+
         else:
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
@@ -663,7 +666,7 @@ class LeggedRobot(BaseTask):
                                                      gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
     def _push_robots(self):
-        """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity. 
+        """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity.
         """
         max_vel = self.cfg.domain_rand.max_push_vel_xy
         self.root_states[:, 7:9] = torch_rand_float(-max_vel, max_vel, (self.num_envs, 2), device=self.device) # lin vel x/y
@@ -679,7 +682,7 @@ class LeggedRobot(BaseTask):
         if not self.init_done:
             # don't change on initial reset
             return
-        
+
         dis_to_origin = torch.norm(self.root_states[env_ids, :2] - self.env_origins[env_ids, :2], dim=1)
         threshold = self.commands[env_ids, 0] * self.cfg.env.episode_length_s
         move_up =dis_to_origin > 0.8*threshold
@@ -692,7 +695,7 @@ class LeggedRobot(BaseTask):
                                                    torch.clip(self.terrain_levels[env_ids], 0)) # (the minumum level is zero)
         self.env_origins[env_ids] = self.terrain_origins[self.terrain_levels[env_ids], self.terrain_types[env_ids]]
         self.env_class[env_ids] = self.terrain_class[self.terrain_levels[env_ids], self.terrain_types[env_ids]]
-        
+
         temp = self.terrain_goals[self.terrain_levels, self.terrain_types]
         last_col = temp[:, -1].unsqueeze(1)
         self.env_goals[:] = torch.cat((temp, last_col.repeat(1, self.cfg.env.num_future_goal_obs, 1)), dim=1)[:]
@@ -714,7 +717,7 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_force_sensor_tensor(self.sim)
-            
+
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_state_tensor).view(self.num_envs, -1, 13)
@@ -789,9 +792,9 @@ class LeggedRobot(BaseTask):
             self.height_update_interval = int(self.cfg.env.height_update_dt / (self.cfg.sim.dt * self.cfg.control.decimation))
 
         if self.cfg.depth.use_camera:
-            self.depth_buffer = torch.zeros(self.num_envs,  
-                                            self.cfg.depth.buffer_len, 
-                                            self.cfg.depth.resized[1], 
+            self.depth_buffer = torch.zeros(self.num_envs,
+                                            self.cfg.depth.buffer_len,
+                                            self.cfg.depth.resized[1],
                                             self.cfg.depth.resized[0]).to(self.device)
 
     def _prepare_reward_function(self):
@@ -802,7 +805,7 @@ class LeggedRobot(BaseTask):
         for key in list(self.reward_scales.keys()):
             scale = self.reward_scales[key]
             if scale==0:
-                self.reward_scales.pop(key) 
+                self.reward_scales.pop(key)
             else:
                 self.reward_scales[key] *= self.dt
         # prepare list of functions
@@ -828,7 +831,7 @@ class LeggedRobot(BaseTask):
         plane_params.dynamic_friction = self.cfg.terrain.dynamic_friction
         plane_params.restitution = self.cfg.terrain.restitution
         self.gym.add_ground(self.sim, plane_params)
-    
+
     def _create_heightfield(self):
         """ Adds a heightfield terrain to the simulation, sets parameters based on the cfg.
         """
@@ -837,7 +840,7 @@ class LeggedRobot(BaseTask):
         hf_params.row_scale = self.cfg.terrain.horizontal_scale
         hf_params.vertical_scale = self.cfg.terrain.vertical_scale
         hf_params.nbRows = self.terrain.tot_cols
-        hf_params.nbColumns = self.terrain.tot_rows 
+        hf_params.nbColumns = self.terrain.tot_rows
         hf_params.transform.p.x = -self.terrain.border
         hf_params.transform.p.y = -self.terrain.border
         hf_params.transform.p.z = 0.0
@@ -856,14 +859,14 @@ class LeggedRobot(BaseTask):
         tm_params.nb_vertices = self.terrain.vertices.shape[0]
         tm_params.nb_triangles = self.terrain.triangles.shape[0]
 
-        tm_params.transform.p.x = -self.terrain.cfg.border_size 
+        tm_params.transform.p.x = -self.terrain.cfg.border_size
         tm_params.transform.p.y = -self.terrain.cfg.border_size
         tm_params.transform.p.z = 0.0
         tm_params.static_friction = self.cfg.terrain.static_friction
         tm_params.dynamic_friction = self.cfg.terrain.dynamic_friction
         tm_params.restitution = self.cfg.terrain.restitution
         print("Adding trimesh to simulation...")
-        self.gym.add_triangle_mesh(self.sim, self.terrain.vertices.flatten(order='C'), self.terrain.triangles.flatten(order='C'), tm_params)  
+        self.gym.add_triangle_mesh(self.sim, self.terrain.vertices.flatten(order='C'), self.terrain.triangles.flatten(order='C'), tm_params)
         print("Trimesh added")
         self.height_samples = torch.tensor(self.terrain.heightsamples).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
         self.x_edge_mask = torch.tensor(self.terrain.x_edge_mask).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
@@ -876,28 +879,28 @@ class LeggedRobot(BaseTask):
             camera_props.width = self.cfg.depth.original[0]
             camera_props.height = self.cfg.depth.original[1]
             camera_props.enable_tensors = True
-            camera_horizontal_fov = self.cfg.depth.horizontal_fov 
+            camera_horizontal_fov = self.cfg.depth.horizontal_fov
             camera_props.horizontal_fov = camera_horizontal_fov
 
             camera_handle = self.gym.create_camera_sensor(env_handle, camera_props)
             self.cam_handles.append(camera_handle)
-            
+
             local_transform = gymapi.Transform()
-            
+
             camera_position = np.copy(config.position)
             camera_angle = np.random.uniform(config.angle[0], config.angle[1])
-            
+
             local_transform.p = gymapi.Vec3(*camera_position)
             local_transform.r = gymapi.Quat.from_euler_zyx(0, np.radians(camera_angle), 0)
             root_handle = self.gym.get_actor_root_rigid_body_handle(env_handle, actor_handle)
-            
+
             self.gym.attach_camera_to_body(camera_handle, env_handle, root_handle, local_transform, gymapi.FOLLOW_TRANSFORM)
 
     def _create_envs(self):
         """ Creates environments:
              1. loads the robot URDF/MJCF asset,
              2. For each environment
-                2.1 creates the environment, 
+                2.1 creates the environment,
                 2.2 calls DOF and Rigid shape properties callbacks,
                 2.3 create actor with these properties and add them to the env
              3. Store indices of different bodies of the robot
@@ -939,7 +942,7 @@ class LeggedRobot(BaseTask):
             feet_idx = self.gym.find_asset_rigid_body_index(robot_asset, s)
             sensor_pose = gymapi.Transform(gymapi.Vec3(0.0, 0.0, 0.0))
             self.gym.create_asset_force_sensor(robot_asset, feet_idx, sensor_pose)
-        
+
         penalized_contact_names = []
         for name in self.cfg.asset.penalize_contacts_on:
             penalized_contact_names.extend([s for s in body_names if name in s])
@@ -960,7 +963,7 @@ class LeggedRobot(BaseTask):
         self.cam_handles = []
         self.cam_tensors = []
         self.mass_params_tensor = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
-        
+
         print("Creating env...")
         for i in tqdm(range(self.num_envs)):
             # create env instance
@@ -983,7 +986,7 @@ class LeggedRobot(BaseTask):
             self.gym.set_actor_rigid_body_properties(env_handle, anymal_handle, body_props, recomputeInertia=True)
             self.envs.append(env_handle)
             self.actor_handles.append(anymal_handle)
-            
+
             self.attach_camera(i, env_handle, anymal_handle)
 
             self.mass_params_tensor[i, :] = torch.from_numpy(mass_params).to(self.device).to(torch.float)
@@ -1014,7 +1017,7 @@ class LeggedRobot(BaseTask):
         self.calf_indices = torch.zeros(len(calf_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i, name in enumerate(calf_names):
             self.calf_indices[i] = self.dof_names.index(name)
-    
+
     def _get_env_origins(self):
         """ Sets environment origins. On rough terrain the origins are defined by the terrain platforms.
             Otherwise create a grid.
@@ -1031,7 +1034,7 @@ class LeggedRobot(BaseTask):
             self.max_terrain_level = self.cfg.terrain.num_rows
             self.terrain_origins = torch.from_numpy(self.terrain.env_origins).to(self.device).to(torch.float)
             self.env_origins[:] = self.terrain_origins[self.terrain_levels, self.terrain_types]
-            
+
             self.terrain_class = torch.from_numpy(self.terrain.terrain_type).to(self.device).to(torch.float)
             self.env_class[:] = self.terrain_class[self.terrain_levels, self.terrain_types]
 
@@ -1093,7 +1096,7 @@ class LeggedRobot(BaseTask):
             z = heights[j]
             sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
             gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
-    
+
     def _draw_goals(self):
         sphere_geom = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(1, 0, 0))
         sphere_geom_cur = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(0, 0, 1))
@@ -1110,7 +1113,7 @@ class LeggedRobot(BaseTask):
                     gymutil.draw_lines(sphere_geom_reached, self.gym, self.viewer, self.envs[self.lookat_id], pose)
             else:
                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[self.lookat_id], pose)
-        
+
         if not self.cfg.depth.use_camera:
             sphere_geom_arrow = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(1, 0.35, 0.25))
             pose_robot = self.root_states[self.lookat_id, :3].cpu().numpy()
@@ -1120,7 +1123,7 @@ class LeggedRobot(BaseTask):
                 pose_arrow = pose_robot[:2] + 0.1*(i+3) * target_vec_norm[self.lookat_id, :2].cpu().numpy()
                 pose = gymapi.Transform(gymapi.Vec3(pose_arrow[0], pose_arrow[1], pose_robot[2]), r=None)
                 gymutil.draw_lines(sphere_geom_arrow, self.gym, self.viewer, self.envs[self.lookat_id], pose)
-            
+
             sphere_geom_arrow = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(0, 1, 0.5))
             for i in range(5):
                 norm = torch.norm(self.next_target_pos_rel, dim=-1, keepdim=True)
@@ -1128,7 +1131,7 @@ class LeggedRobot(BaseTask):
                 pose_arrow = pose_robot[:2] + 0.2*(i+3) * target_vec_norm[self.lookat_id, :2].cpu().numpy()
                 pose = gymapi.Transform(gymapi.Vec3(pose_arrow[0], pose_arrow[1], pose_robot[2]), r=None)
                 gymutil.draw_lines(sphere_geom_arrow, self.gym, self.viewer, self.envs[self.lookat_id], pose)
-        
+
     def _draw_feet(self):
         if hasattr(self, 'feet_at_edge'):
             non_edge_geom = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(0, 1, 0))
@@ -1141,7 +1144,7 @@ class LeggedRobot(BaseTask):
                     gymutil.draw_lines(edge_geom, self.gym, self.viewer, self.envs[i], pose)
                 else:
                     gymutil.draw_lines(non_edge_geom, self.gym, self.viewer, self.envs[i], pose)
-    
+
     def _init_height_points(self):
         """ Returns points at which the height measurments are sampled (in base frame)
 
@@ -1238,15 +1241,15 @@ class LeggedRobot(BaseTask):
     def _reward_tracking_yaw(self):
         rew = torch.exp(-torch.abs(self.target_yaw - self.yaw))
         return rew
-    
+
     def _reward_lin_vel_z(self):
         rew = torch.square(self.base_lin_vel[:, 2])
         rew[self.env_class != 17] *= 0.5
         return rew
-    
+
     def _reward_ang_vel_xy(self):
         return torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1)
-     
+
     def _reward_orientation(self):
         rew = torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
         rew[self.env_class != 17] = 0.
@@ -1263,7 +1266,7 @@ class LeggedRobot(BaseTask):
 
     def _reward_delta_torques(self):
         return torch.sum(torch.square(self.torques - self.last_torques), dim=1)
-    
+
     def _reward_torques(self):
         return torch.sum(torch.square(self.torques), dim=1)
 
@@ -1273,7 +1276,7 @@ class LeggedRobot(BaseTask):
     def _reward_dof_error(self):
         dof_error = torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1)
         return dof_error
-    
+
     def _reward_feet_stumble(self):
         # Penalize feet hitting vertical surfaces
         rew = torch.any(torch.norm(self.contact_forces[:, self.feet_indices, :2], dim=2) >\
@@ -1285,7 +1288,7 @@ class LeggedRobot(BaseTask):
         feet_pos_xy[..., 0] = torch.clip(feet_pos_xy[..., 0], 0, self.x_edge_mask.shape[0]-1)
         feet_pos_xy[..., 1] = torch.clip(feet_pos_xy[..., 1], 0, self.x_edge_mask.shape[1]-1)
         feet_at_edge = self.x_edge_mask[feet_pos_xy[..., 0], feet_pos_xy[..., 1]]
-    
+
         self.feet_at_edge = self.contact_filt & feet_at_edge
         rew = (self.terrain_levels > 3) * torch.sum(self.feet_at_edge, dim=-1)
         return rew

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
 #
@@ -62,7 +62,7 @@ class BaseTask():
         self.num_obs = cfg.env.num_observations
         self.num_privileged_obs = cfg.env.num_privileged_obs
         self.num_actions = cfg.env.num_actions
-        
+
         # optimization flags for pytorch JIT
         torch._C._jit_set_profiling_mode(False)
         torch._C._jit_set_profiling_executor(False)
@@ -75,7 +75,7 @@ class BaseTask():
         self.time_out_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         if self.num_privileged_obs is not None:
             self.privileged_obs_buf = torch.zeros(self.num_envs, self.num_privileged_obs, device=self.device, dtype=torch.float)
-        else: 
+        else:
             self.privileged_obs_buf = None
             # self.num_privileged_obs = self.num_obs
 
@@ -123,7 +123,7 @@ class BaseTask():
 
     def get_observations(self):
         return self.obs_buf
-    
+
     def get_privileged_observations(self):
         return self.privileged_obs_buf
 
@@ -158,7 +158,7 @@ class BaseTask():
                     sys.exit()
                 elif evt.action == "toggle_viewer_sync" and evt.value > 0:
                     self.enable_viewer_sync = not self.enable_viewer_sync
-                
+
                 if not self.free_cam:
                     for i in range(9):
                         if evt.action == "lookat" + str(i) and evt.value > 0:
@@ -182,7 +182,7 @@ class BaseTask():
                     self.free_cam = not self.free_cam
                     if self.free_cam:
                         self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
-                
+
                 if evt.action == "pause" and evt.value > 0:
                     self.pause = True
                     while self.pause:
@@ -194,8 +194,8 @@ class BaseTask():
                         if self.gym.query_viewer_has_closed(self.viewer):
                             sys.exit()
 
-                        
-                
+
+
             # fetch results
             if self.device != 'cpu':
                 self.gym.fetch_results(self.sim, True)
@@ -209,10 +209,10 @@ class BaseTask():
                     self.gym.sync_frame_time(self.sim)
             else:
                 self.gym.poll_viewer_events(self.viewer)
-            
+
             if not self.free_cam:
                 p = self.gym.get_viewer_camera_transform(self.viewer, None).p
                 cam_trans = torch.tensor([p.x, p.y, p.z], requires_grad=False, device=self.device)
                 look_at_pos = self.root_states[self.lookat_id, :3].clone()
                 self.lookat_vec = cam_trans - look_at_pos
-            
+
