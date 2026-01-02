@@ -201,7 +201,7 @@ def play(args):
         obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
         obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
 
-        obs_proprio[:, 6:8] = torch.Tensor(yaw) 
+        obs_proprio[:, 6:8] = 1.5 * torch.Tensor(yaw)
 
         if infos["depth"] is not None:
             update_depth = 1.0
