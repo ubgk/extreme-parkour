@@ -192,7 +192,7 @@ def play(args):
     yaw = np.zeros((1, 2), dtype=np.float32)
 
     import onnxruntime as ort
-    session = ort.InferenceSession("extreme_branchless_v3.onnx")
+    session = ort.InferenceSession("branchless_fd.onnx")
 
     for i in range(10*int(env.max_episode_length)):
         if infos["depth"] is not None:
@@ -216,7 +216,7 @@ def play(args):
                         'obs_hist': obs_hist[eid:eid+1].cpu().numpy(),
                         'rnn_hidden_in': hidden_states
                       }
-        ort_outs = session.run(['actions', 'rnn_hidden_out', 'depth_latent_out', 'yaw_out'], ort_inputs)
+        ort_outs = session.run(['actions', 'rnn_hidden_out', 'depth_latent_out', 'yaw'], ort_inputs)
 
         if infos["depth"] is not None:
             hidden_states = ort_outs[1]
