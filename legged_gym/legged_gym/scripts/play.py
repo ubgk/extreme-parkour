@@ -226,7 +226,7 @@ def play(args):
         if i == 0:
             assert (obs_hist == 0.0).all(), "Initial obs history is not zero."
         elif i >= 1:
-            torch.testing.assert_allclose(obs_hist, branchless_obs_history.view(env.num_envs, -1), rtol=1e-04, atol=1e-04)
+            torch.testing.assert_allclose(obs_hist, branchless_obs_history.view(env.num_envs, -1), rtol=1e-06, atol=1e-06)
 
         if infos["depth"] is not None:
             depth_buf = infos["depth"].clone()
@@ -260,7 +260,7 @@ def play(args):
         else:
             actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
 
-        torch.testing.assert_allclose(actions, branchless_actions, rtol=1e-04, atol=1e-04)
+        torch.testing.assert_allclose(actions, branchless_actions, rtol=1e-06, atol=1e-06)
         print("Max action diff:", torch.max(torch.abs(actions - branchless_actions)).item())
         # torch.onnx.export(actor_wrapper, (depth_latent_and_yaw[:1], obs_proprio[:1], obs_hist[:1]), 'relaxed_actor.onnx', input_names=['depth_latent_and_yaw', 'obs_proprio', 'obs_hist'], output_names=['actions'])
 
