@@ -96,7 +96,11 @@ class DepthActorWrapper(torch.nn.Module):
         self.depth_wrapper = depth_wrapper
         self.actor_wrapper = actor_wrapper
 
-    def forward(self, depth, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states_in, obs_priv = None):
+    def forward(self, depth, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states_in, step_counter, obs_priv = None):
+        num_envs = obs_proprio.shape[0]
+        n_proprio = obs_proprio.shape[1]
+        hist_len = obs_hist.shape[1]
+
         new_depth_latent, new_yaw, hidden_states_out = self.depth_wrapper(depth, obs_proprio, hidden_states_in)
 
         hidden_states_out = (update_depth * hidden_states_out) + (1 - update_depth) * hidden_states_in
@@ -105,9 +109,20 @@ class DepthActorWrapper(torch.nn.Module):
         yaw = (update_depth * new_yaw) + (1 - update_depth) * yaw
         obs_proprio[:, 6:8] = 1.5 * yaw
 
-        actions = self.actor_wrapper(depth_latent, obs_proprio, obs_hist, obs_priv)
+        actions = self.actor_wrapper(depth_latent, obs_proprio, obs_hist.view(num_envs, -1), obs_priv)
 
-        return actions, hidden_states_out, depth_latent, yaw
+        # update obs history
+        obs_hist[:] = torch.where(
+            (step_counter <= 1)[:, None, None],
+            torch.stack([obs_proprio] * hist_len, dim=1),
+            torch.cat([
+                obs_hist.view(num_envs, hist_len, n_proprio)[:, 1:],
+                obs_proprio.unsqueeze(1)
+            ], dim=1)
+        )
+        obs_hist[:, :, 6:8] = 0.0
+
+        return actions, hidden_states_out, depth_latent, yaw, obs_hist
 
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     if checkpoint==-1:
@@ -195,15 +210,23 @@ def play(args):
                                  estimator=ppo_runner.alg.estimator)
 
     depth_actor_wrapper = DepthActorWrapper(depth_wrapper, actor_wrapper)
-    hidden_states = torch.zeros((1, env.num_envs, 512), device=env.device)
+    branchless_hidden_states = torch.zeros((1, env.num_envs, 512), device=env.device)
 
-    depth_latent = torch.zeros((env.num_envs, 32), device=env.device)
-    yaw = torch.zeros((env.num_envs, 2), device=env.device)
+    branchless_depth_latent = torch.zeros((env.num_envs, 32), device=env.device)
+    branchless_yaw = torch.zeros((env.num_envs, 2), device=env.device)
+
+    branchless_obs_history = torch.zeros((env.num_envs, env.cfg.env.history_len, env.cfg.env.n_proprio), device=env.device)
+    obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
 
     for i in range(10*int(env.max_episode_length)):
         # Branchless depth actor wrapper
         obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
         obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
+
+        if i == 0:
+            assert (obs_hist == 0.0).all(), "Initial obs history is not zero."
+        elif i >= 1:
+            torch.testing.assert_allclose(obs_hist, branchless_obs_history.view(env.num_envs, -1), rtol=1e-04, atol=1e-04)
 
         if infos["depth"] is not None:
             depth_buf = infos["depth"].clone()
@@ -211,7 +234,8 @@ def play(args):
         else:
             update_depth = 0.0
 
-        branchless_actions, hidden_states, depth_latent, yaw = depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states)
+        branchless_actions, branchless_hidden_states, branchless_depth_latent, branchless_yaw, branchless_obs_history = \
+        depth_actor_wrapper(depth_buf, branchless_depth_latent, branchless_yaw, update_depth, obs_proprio, branchless_obs_history, branchless_hidden_states, env.episode_length_buf)
 
         # Original depth actor
         if env.cfg.depth.use_camera:
