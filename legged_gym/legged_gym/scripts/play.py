@@ -210,23 +210,17 @@ def play(args):
                                  estimator=ppo_runner.alg.estimator)
 
     depth_actor_wrapper = DepthActorWrapper(depth_wrapper, actor_wrapper)
-    branchless_hidden_states = torch.zeros((1, env.num_envs, 512), device=env.device)
+    hidden_states = torch.zeros((1, env.num_envs, 512), device=env.device)
 
-    branchless_depth_latent = torch.zeros((env.num_envs, 32), device=env.device)
-    branchless_yaw = torch.zeros((env.num_envs, 2), device=env.device)
+    depth_latent = torch.zeros((env.num_envs, 32), device=env.device)
+    yaw = torch.zeros((env.num_envs, 2), device=env.device)
 
-    branchless_obs_history = torch.zeros((env.num_envs, env.cfg.env.history_len, env.cfg.env.n_proprio), device=env.device)
+    obs_history = torch.zeros((env.num_envs, env.cfg.env.history_len, env.cfg.env.n_proprio), device=env.device)
     obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
 
     for i in range(10*int(env.max_episode_length)):
         # Branchless depth actor wrapper
         obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
-        obs_hist = obs[:, -env.cfg.env.history_len*env.cfg.env.n_proprio:].clone()
-
-        if i == 0:
-            assert (obs_hist == 0.0).all(), "Initial obs history is not zero."
-        elif i >= 1:
-            torch.testing.assert_allclose(obs_hist, branchless_obs_history.view(env.num_envs, -1), rtol=1e-06, atol=1e-06)
 
         if infos["depth"] is not None:
             depth_buf = infos["depth"].clone()
@@ -234,35 +228,8 @@ def play(args):
         else:
             update_depth = 0.0
 
-        branchless_actions, branchless_hidden_states, branchless_depth_latent, branchless_yaw, branchless_obs_history = \
-        depth_actor_wrapper(depth_buf, branchless_depth_latent, branchless_yaw, update_depth, obs_proprio, branchless_obs_history, branchless_hidden_states, env.episode_length_buf)
-
-        # Original depth actor
-        if env.cfg.depth.use_camera:
-            if infos["depth"] is not None:
-                obs_student = obs[:, :env.cfg.env.n_proprio].clone()
-                obs_student[:, 6:8] = 0
-                depth_latent_and_yaw = depth_encoder(infos["depth"], obs_student)
-                depth_latent = depth_latent_and_yaw[:, :-2]
-                yaw = depth_latent_and_yaw[:, -2:]
-            obs[:, 6:8] = 1.5*yaw
-
-        else:
-            depth_latent = None
-
-        priv_explicit = estimator(obs[:, :env.cfg.env.n_proprio])
-        actor = ppo_runner.alg.depth_actor
-        offset = actor.num_prop + actor.num_scan
-        obs[:, offset:offset + actor.num_priv_explicit] = priv_explicit
-
-        if hasattr(ppo_runner.alg, "depth_actor"):
-            actions = ppo_runner.alg.depth_actor(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
-        else:
-            actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
-
-        torch.testing.assert_allclose(actions, branchless_actions, rtol=1e-06, atol=1e-06)
-        print("Max action diff:", torch.max(torch.abs(actions - branchless_actions)).item())
-        # torch.onnx.export(actor_wrapper, (depth_latent_and_yaw[:1], obs_proprio[:1], obs_hist[:1]), 'relaxed_actor.onnx', input_names=['depth_latent_and_yaw', 'obs_proprio', 'obs_hist'], output_names=['actions'])
+        actions, hidden_states, depth_latent, yaw, obs_history = \
+        depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_history, hidden_states, env.episode_length_buf)
 
         obs, _, rews, dones, infos = env.step(actions.detach())
         if args.web:
