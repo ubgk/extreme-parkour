@@ -99,6 +99,7 @@ class DepthActorWrapper(torch.nn.Module):
     def forward(self, depth, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states_in, obs_priv = None):
         new_depth_latent, new_yaw, hidden_states_out = self.depth_wrapper(depth, obs_proprio, hidden_states_in)
 
+        hidden_states_out = (update_depth * hidden_states_out) + (1 - update_depth) * hidden_states_in
         depth_latent = (update_depth * new_depth_latent) + (1 - update_depth) * depth_latent
 
         yaw = (update_depth * new_yaw) + (1 - update_depth) * yaw
@@ -106,7 +107,7 @@ class DepthActorWrapper(torch.nn.Module):
 
         actions = self.actor_wrapper(depth_latent, obs_proprio, obs_hist, obs_priv)
 
-        return actions, hidden_states_out, depth_latent, new_yaw
+        return actions, hidden_states_out, depth_latent, yaw
 
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     if checkpoint==-1:
@@ -207,11 +208,10 @@ def play(args):
         if infos["depth"] is not None:
             depth_buf = infos["depth"].clone()
             update_depth = 1.0
-            branchless_actions, hidden_states, depth_latent, yaw = depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states)
-
         else:
             update_depth = 0.0
-            branchless_actions, _, _, _ = depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states)
+
+        branchless_actions, hidden_states, depth_latent, yaw = depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states)
 
         # Original depth actor
         if env.cfg.depth.use_camera:
