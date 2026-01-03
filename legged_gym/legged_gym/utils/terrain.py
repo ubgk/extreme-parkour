@@ -324,6 +324,9 @@ class Terrain:
         # np.set_printoptions(precision=2)
         # print(np.array(self.proportions), choice)
         terrain.idx = idx
+
+        # Zero all the terrain to debug
+        terrain.height_field_raw[:] = 0
         return terrain
 
     def add_terrain_to_map(self, terrain, row, col):

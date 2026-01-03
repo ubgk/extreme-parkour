@@ -188,6 +188,7 @@ class Actor(nn.Module):
 
             # obs_priv_explicit is 9D, first 3D are the base lin vel, the rest are 0
             obs_priv_explicit = obs[:, self.num_prop + self.num_scan:self.num_prop + self.num_scan + self.num_priv_explicit]
+
             if hist_encoding: # TRUE
                 latent = self.infer_hist_latent(obs) # obs[:, -self.num_hist*self.num_prop:]
             else:

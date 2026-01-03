@@ -223,12 +223,16 @@ def play(args):
     import onnxruntime as ort
     ort_session = ort.InferenceSession("branchless_fd_history.onnx")
 
+    action_record = []
+    obs_record = []
+
     for i in range(10*int(env.max_episode_length)):
         # Branchless depth actor wrapper
         obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
+        obs_proprio[:, 6:8] = 0 * yaw
 
         if infos["depth"] is not None:
-            depth_buf = infos["depth"].clone()
+            depth_buf = 0 * infos["depth"].clone()
             update_depth[:] = 1.0
         else:
             update_depth[:] = 0.0
@@ -241,20 +245,29 @@ def play(args):
             'update_depth': update_depth[:1].detach().cpu().numpy(),
             'obs_proprio': obs_proprio[:1].detach().cpu().numpy(),
             'obs_history_in': onnx_history[:1].detach().cpu().numpy(),
-            'hidden_states_in': onnx_hidden_states[:, :1].detach().cpu().numpy(),
+            'hidden_states_in': 0 * onnx_hidden_states[:, :1].detach().cpu().numpy(),
             'step_counter': env.episode_length_buf[:1].detach().cpu().numpy(),
         }
         ort_outs = ort_session.run(None, ort_inputs)
         onnx_actions = torch.tensor(ort_outs[0], device=env.device)
+        depth_latent[:] = torch.tensor(ort_outs[1], device=env.device)
+        yaw[:] = torch.tensor(ort_outs[2], device=env.device)
         onnx_history[:] = torch.tensor(ort_outs[3], device=env.device)
         onnx_hidden_states[:] = torch.tensor(ort_outs[4], device=env.device)
 
-        actions, depth_latent, yaw, obs_history, hidden_states = \
-        depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_history, hidden_states, env.episode_length_buf)
+        # Append for later comparison
+        action_record.append(onnx_actions.cpu().numpy())
+        obs_record.append(obs_proprio[:1].cpu().numpy())
 
-        torch.testing.assert_allclose(onnx_actions, actions[:1], rtol=1e-03, atol=1e-03)
-        torch.testing.assert_allclose(onnx_history, obs_history[:1], rtol=1e-03, atol=1e-03)
-        torch.testing.assert_allclose(onnx_hidden_states[:, :1], hidden_states[:, :1], rtol=1e-03, atol=1e-03)
+        if len(action_record) == 1500:
+            breakpoint()
+
+        # torch.testing.assert_allclose(onnx_actions, actions[:1], rtol=1e-03, atol=1e-03)
+        # torch.testing.assert_allclose(onnx_history, obs_history[:1], rtol=1e-03, atol=1e-03)
+        # torch.testing.assert_allclose(onnx_hidden_states[:, :1], hidden_states[:, :1], rtol=1e-03, atol=1e-03)
+
+        actions[0:1] = torch.tensor(onnx_actions, device=env.device)
+        actions *= 0.0
 
         obs, _, rews, dones, infos = env.step(actions.detach())
         if args.web:

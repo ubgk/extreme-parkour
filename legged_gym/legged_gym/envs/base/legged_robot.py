@@ -168,7 +168,7 @@ class LeggedRobot(BaseTask):
         # These operations are replicated on the hardware
         # depth_image shape is (H, W) -> (60, 106)
         depth_image = self.crop_depth_image(depth_image) # (58, 98)
-        depth_image += self.cfg.depth.dis_noise * 2 * (torch.rand(1)-0.5)[0]
+        depth_image += self.cfg.depth.dis_noise * 2 * (torch.rand(1)-0.5)[0] # N.B.: self.cfg.depth.dis_noise is 0.0
         depth_image = torch.clip(depth_image, -self.cfg.depth.far_clip, -self.cfg.depth.near_clip)
         depth_image = self.resize_transform(depth_image[None, :]).squeeze() # (58, 87)
         depth_image = self.normalize_depth_image(depth_image)
@@ -391,23 +391,25 @@ class LeggedRobot(BaseTask):
         Computes observations
         """
         imu_obs = torch.stack((self.roll, self.pitch), dim=1)
+        print(f'roll: {self.roll[0].item():.3f}, pitch: {self.pitch[0].item():.3f}')
+
         if self.global_counter % 5 == 0:
             self.delta_yaw = self.target_yaw - self.yaw
             self.delta_next_yaw = self.next_target_yaw - self.yaw
         obs_buf = torch.cat((#skill_vector,
-                            self.base_ang_vel  * self.obs_scales.ang_vel,   #[1,3]
-                            imu_obs,    #[1,2]
-                            0*self.delta_yaw[:, None],
-                            self.delta_yaw[:, None],
-                            self.delta_next_yaw[:, None],
-                            0*self.commands[:, 0:2],
-                            self.commands[:, 0:1],  #[1,1]
-                            (self.env_class != 17).float()[:, None],
-                            (self.env_class == 17).float()[:, None],
-                            self.reindex((self.dof_pos - self.default_dof_pos_all) * self.obs_scales.dof_pos),
-                            self.reindex(self.dof_vel_fd * self.obs_scales.dof_vel),
-                            self.reindex(self.action_history_buf[:, -1]),
-                            self.reindex_feet(self.contact_filt.float()-0.5),
+                            0 * self.base_ang_vel  * self.obs_scales.ang_vel,   #[1,3]
+                            0 * imu_obs,    #[1,2]
+                            0 * 0*self.delta_yaw[:, None],
+                            0 * self.delta_yaw[:, None],
+                            0 * self.delta_next_yaw[:, None],
+                            0 * 0*self.commands[:, 0:2],
+                            0 * self.commands[:, 0:1],  #[1,1]
+                            0 * (self.env_class != 17).float()[:, None],
+                            0 * (self.env_class == 17).float()[:, None],
+                            1 * self.reindex((self.dof_pos - self.default_dof_pos_all) * self.obs_scales.dof_pos),
+                            1 * self.reindex(self.dof_vel_fd * self.obs_scales.dof_vel),
+                            0 * self.reindex(self.action_history_buf[:, -1]),
+                            1 * self.reindex_feet(self.contact_filt.float()-0.5),
                             ),dim=-1)
         priv_explicit = torch.cat((self.base_lin_vel * self.obs_scales.lin_vel,
                                    0 * self.base_lin_vel,
@@ -604,10 +606,10 @@ class LeggedRobot(BaseTask):
             [torch.Tensor]: Torques sent to the simulation
         """
         #pd controller
-        actions_scaled = actions * self.cfg.control.action_scale
+        actions_scaled = 0 * actions * self.cfg.control.action_scale
         control_type = self.cfg.control.control_type
         if control_type=="P": # True
-            if not self.cfg.domain_rand.randomize_motor:  # TODO add strength to gain directly
+            if True or not self.cfg.domain_rand.randomize_motor:  # TODO add strength to gain directly
                 torques = self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.d_gains*self.dof_vel
             else:
                 torques = self.motor_strength[0] * self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.motor_strength[1] * self.d_gains*self.dof_vel
