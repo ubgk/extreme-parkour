@@ -122,7 +122,7 @@ class DepthActorWrapper(torch.nn.Module):
         )
         obs_hist[:, :, 6:8] = 0.0
 
-        return actions, hidden_states_out, depth_latent, yaw, obs_hist
+        return actions, depth_latent, yaw, obs_hist, hidden_states_out
 
 def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
     if checkpoint==-1:
@@ -216,7 +216,6 @@ def play(args):
     yaw = torch.zeros((env.num_envs, 2), device=env.device)
 
     obs_history = torch.zeros((env.num_envs, env.cfg.env.history_len, env.cfg.env.n_proprio), device=env.device)
-    obs_proprio = obs[:, :env.cfg.env.n_proprio].clone()
 
     for i in range(10*int(env.max_episode_length)):
         # Branchless depth actor wrapper
@@ -228,7 +227,7 @@ def play(args):
         else:
             update_depth = 0.0
 
-        actions, hidden_states, depth_latent, yaw, obs_history = \
+        actions, depth_latent, yaw, obs_history, hidden_states = \
         depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_history, hidden_states, env.episode_length_buf)
 
         obs, _, rews, dones, infos = env.step(actions.detach())
