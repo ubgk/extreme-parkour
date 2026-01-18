@@ -301,7 +301,7 @@ class Terrain:
                                    x_range=[0.3,1.5],
                                    y_range=self.cfg.y_range,
                                    half_valid_width=[0.5, 1],
-                                   pad_height=0,
+                                   pad_height=1.25,
                                    )
             self.add_roughness(terrain)
         elif choice < self.proportions[18]:
