@@ -287,7 +287,7 @@ class Terrain:
                                    num_stones=self.num_goals - 2,
                                    stone_len=0.1+0.3*difficulty,
                                    hurdle_height_range=[0.1+0.1*difficulty, 0.15+0.15*difficulty],
-                                   pad_height=0,
+                                   pad_height=2.0,
                                    y_range=self.cfg.y_range,
                                    half_valid_width=[0.45, 1],
                                    flat=True
@@ -572,7 +572,7 @@ def parkour_hurdle_terrain(terrain,
                            y_range=[-0.4, 0.4],
                            half_valid_width=[0.4, 0.8],
                            hurdle_height_range=[0.2, 0.3],
-                           pad_width=0.1,
+                           pad_width=1.0,
                            pad_height=0.5,
                            flat=False):
     goals = np.zeros((num_stones+2, 2))
@@ -629,8 +629,8 @@ def parkour_hurdle_terrain(terrain,
     pad_height = int(pad_height // terrain.vertical_scale)
     terrain.height_field_raw[:, :pad_width] = pad_height
     terrain.height_field_raw[:, -pad_width:] = pad_height
-    terrain.height_field_raw[:pad_width, :] = pad_height
-    terrain.height_field_raw[-pad_width:, :] = pad_height
+    # terrain.height_field_raw[:pad_width, :] = pad_height
+    # terrain.height_field_raw[-pad_width:, :] = pad_height
 
 def parkour_step_terrain(terrain,
                            platform_len=2.5, 
