@@ -96,7 +96,7 @@ class DepthActorWrapper(torch.nn.Module):
         self.depth_wrapper = depth_wrapper
         self.actor_wrapper = actor_wrapper
 
-    def forward(self, depth, depth_latent, yaw, update_depth, obs_proprio, obs_hist, hidden_states_in, step_counter, obs_priv = None):
+    def forward(self, depth, depth_latent, yaw, update_depth, update_yaw, obs_proprio, obs_hist, hidden_states_in, step_counter, obs_priv = None):
         num_envs = obs_proprio.shape[0]
         n_proprio = obs_proprio.shape[1]
         hist_len = obs_hist.shape[1]
@@ -106,7 +106,7 @@ class DepthActorWrapper(torch.nn.Module):
         hidden_states_out = (update_depth * hidden_states_out) + (1 - update_depth) * hidden_states_in
         depth_latent = (update_depth * new_depth_latent) + (1 - update_depth) * depth_latent
 
-        yaw = (update_depth * new_yaw) + (1 - update_depth) * yaw
+        yaw = (update_yaw * new_yaw) + (1 - update_yaw) * yaw
         obs_proprio[:, 6:8] = 1.5 * yaw
 
         actions = self.actor_wrapper(depth_latent, obs_proprio, obs_hist.view(num_envs, -1), obs_priv)
@@ -224,11 +224,13 @@ def play(args):
         if infos["depth"] is not None:
             depth_buf = infos["depth"].clone()
             update_depth = 1.0
+            update_yaw = 1.0
         else:
             update_depth = 0.0
+            update_yaw = 0.0
 
         actions, depth_latent, yaw, obs_history, hidden_states = \
-        depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, obs_proprio, obs_history, hidden_states, env.episode_length_buf)
+        depth_actor_wrapper(depth_buf, depth_latent, yaw, update_depth, update_yaw, obs_proprio, obs_history, hidden_states, env.episode_length_buf)
 
         obs, _, rews, dones, infos = env.step(actions.detach())
         if args.web:
