@@ -206,6 +206,8 @@ class LeggedRobotCfg(BaseConfig):
         
         lin_vel_clip = 0.2
         ang_vel_clip = 0.4
+        zero_prob: float = 0.15 # probability of zero command, encourages standing still and better sim2real transfer
+
         # Easy ranges
         class ranges:
             lin_vel_x = [0., 1.5] # min max [m/s]
@@ -292,6 +294,7 @@ class LeggedRobotCfg(BaseConfig):
     class rewards:
         class scales:
             # tracking rewards
+            stand_still = 0.5
             tracking_goal_vel = 1.5
             tracking_yaw = 0.5
             # regularization rewards

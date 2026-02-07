@@ -587,6 +587,10 @@ class LeggedRobot(BaseTask):
             self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
             self.commands[env_ids, 2] *= torch.abs(self.commands[env_ids, 2]) > self.cfg.commands.ang_vel_clip
 
+        # Randomly set some commands to zero to let the policy learn to stop
+        rand_p = torch.rand(len(env_ids), 1, device=self.device)
+        self.commands[env_ids, :2] *= rand_p > self.cfg.commands.zero_prob
+
         # set small commands to zero
         self.commands[env_ids, :2] *= torch.abs(self.commands[env_ids, 0:1]) > self.cfg.commands.lin_vel_clip
 
@@ -1231,12 +1235,19 @@ class LeggedRobot(BaseTask):
 
     ################## parkour rewards ##################
 
+    def _reward_stand_still(self):
+        command_mask = self.commands[:, 0] > 0.01
+        rew = torch.exp(-torch.sum(torch.square(self.root_states[:, 7:13]), dim=-1))
+        return torch.where(command_mask, 1.0, rew)
+
     def _reward_tracking_goal_vel(self):
         norm = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)
-        target_vec_norm = self.target_pos_rel / (norm + 1e-5)
+        target_vec_norm = self.target_pos_rel / (norm + 1e-3)
         cur_vel = self.root_states[:, 7:9]
         rew = torch.minimum(torch.sum(target_vec_norm * cur_vel, dim=-1), self.commands[:, 0]) / (self.commands[:, 0] + 1e-5)
-        return rew
+        command_mask = self.commands[:, 0] > 0.01
+
+        return torch.where(command_mask, rew, 0.0)
 
     def _reward_tracking_yaw(self):
         rew = torch.exp(-torch.abs(self.target_yaw - self.yaw))
@@ -1256,19 +1267,25 @@ class LeggedRobot(BaseTask):
         return rew
 
     def _reward_dof_acc(self):
-        return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
+        rew = torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
+        command_mask = self.commands[:, 0] > 0.01
+        return torch.where(command_mask, rew, rew * 4)
 
     def _reward_collision(self):
         return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices, :], dim=-1) > 0.1), dim=1)
 
     def _reward_action_rate(self):
-        return torch.norm(self.last_actions - self.actions, dim=1)
+        rew = torch.norm(self.last_actions - self.actions, dim=1)
+        command_mask = self.commands[:, 0] > 0.01
+        return torch.where(command_mask, rew, rew * 4)
 
     def _reward_delta_torques(self):
         return torch.sum(torch.square(self.torques - self.last_torques), dim=1)
 
     def _reward_torques(self):
-        return torch.sum(torch.square(self.torques), dim=1)
+        rew = torch.sum(torch.square(self.torques), dim=1)
+        command_mask = self.commands[:, 0] > 0.01
+        return torch.where(command_mask, rew, rew * 4)
 
     def _reward_hip_pos(self):
         return torch.sum(torch.square(self.dof_pos[:, self.hip_indices] - self.default_dof_pos[:, self.hip_indices]), dim=1)
