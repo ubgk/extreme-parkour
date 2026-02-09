@@ -1246,8 +1246,7 @@ class LeggedRobot(BaseTask):
         cur_vel = self.root_states[:, 7:9]
         rew = torch.minimum(torch.sum(target_vec_norm * cur_vel, dim=-1), self.commands[:, 0]) / (self.commands[:, 0] + 1e-5)
         command_mask = self.commands[:, 0] > 0.01
-
-        return torch.where(command_mask, rew, 0.0)
+        return rew * command_mask.float()
 
     def _reward_tracking_yaw(self):
         rew = torch.exp(-torch.abs(self.target_yaw - self.yaw))
