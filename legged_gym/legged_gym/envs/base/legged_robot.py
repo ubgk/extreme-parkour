@@ -1270,7 +1270,7 @@ class LeggedRobot(BaseTask):
         return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
 
     def _reward_dof_vel(self):
-        return torch.sum(torch.square(self.dof_vel_fd, dim=1)
+        return torch.sum(torch.square(self.dof_vel_fd), dim=1)
 
     def _reward_collision(self):
         return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices, :], dim=-1) > 0.1), dim=1)
