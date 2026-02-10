@@ -301,7 +301,7 @@ class LeggedRobot(BaseTask):
         height_cutoff = self.root_states[:, 2] < -0.25
 
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
-        #self.time_out_buf |= reach_goal_cutoff
+        self.time_out_buf |= reach_goal_cutoff
 
         self.reset_buf |= self.time_out_buf
         self.reset_buf |= roll_cutoff
@@ -593,12 +593,6 @@ class LeggedRobot(BaseTask):
 
         # set small commands to zero
         self.commands[env_ids, :2] *= torch.abs(self.commands[env_ids, 0:1]) > self.cfg.commands.lin_vel_clip
-
-        # still haven't reached goal
-        # N.B.: We set ALL goal-reaching agents' commands to zero here, as they will not necessarily be in env_ids
-        reach_goal_cutoff = self.cur_goal_idx < self.cfg.terrain.num_goals
-        self.commands[:, :3] *= reach_goal_cutoff[:, None]
-
 
     def _compute_torques(self, actions):
         """ Compute torques from actions.
@@ -1253,15 +1247,10 @@ class LeggedRobot(BaseTask):
         cur_vel = self.root_states[:, 7:9]
         rew = torch.minimum(torch.sum(target_vec_norm * cur_vel, dim=-1), self.commands[:, 0]) / (self.commands[:, 0] + 1e-5)
         command_mask = self.commands[:, 0] > 0.01
-
-        # still haven't reached goal
-        reach_goal_cutoff = self.cur_goal_idx < self.cfg.terrain.num_goals
-
-        return rew * reach_goal_cutoff * command_mask.float()
+        return rew * command_mask.float()
 
     def _reward_tracking_yaw(self):
         rew = torch.exp(-torch.abs(self.target_yaw - self.yaw))
-        rew *= self.cur_goal_idx < self.cfg.terrain.num_goals
         return rew
 
     def _reward_lin_vel_z(self):
