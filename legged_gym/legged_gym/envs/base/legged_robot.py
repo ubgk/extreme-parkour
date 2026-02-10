@@ -597,7 +597,7 @@ class LeggedRobot(BaseTask):
         # still haven't reached goal
         # N.B.: We set ALL goal-reaching agents' commands to zero here, as they will not necessarily be in env_ids
         reach_goal_cutoff = self.cur_goal_idx < self.cfg.terrain.num_goals
-        self.commands[:, :3] *= reach_goal_cutoff
+        self.commands[:, :3] *= reach_goal_cutoff[:, None]
 
 
     def _compute_torques(self, actions):
