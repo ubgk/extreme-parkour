@@ -1244,7 +1244,8 @@ class LeggedRobot(BaseTask):
     def _reward_tracking_speed(self):
         speed = torch.norm(self.base_lin_vel[:, :2], dim=-1)
         command_speed = self.commands[:, 0]
-        return torch.exp(-4 * torch.square(speed - command_speed))
+        command_mask = self.commands[:, 0] < 0.01
+        return command_mask * torch.exp(-4 * torch.square(speed - command_speed))
 
     def _reward_tracking_goal_vel(self):
         norm = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)
@@ -1280,7 +1281,8 @@ class LeggedRobot(BaseTask):
         return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
 
     def _reward_dof_vel(self):
-        return torch.sum(torch.square(self.dof_vel_fd), dim=1)
+        command_mask = self.commands[:, 0] < 0.01
+        return command_mask * torch.sum(torch.square(self.dof_vel_fd), dim=1)
 
     def _reward_collision(self):
         return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices, :], dim=-1) > 0.1), dim=1)
