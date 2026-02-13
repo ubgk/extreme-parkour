@@ -1235,6 +1235,10 @@ class LeggedRobot(BaseTask):
 
     ################## parkour rewards ##################
 
+    def _reward_standing_still(self):
+        command_mask = self.commands[:, 0] < 0.01
+        return command_mask * self._reward_dof_error()
+
     def _reward_tracking_speed(self):
         speed = torch.norm(self.base_lin_vel[:, :2], dim=-1)
         command_speed = self.commands[:, 0]
@@ -1243,11 +1247,10 @@ class LeggedRobot(BaseTask):
 
     def _reward_tracking_goal_vel(self):
         norm = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)
-        target_vec_norm = self.target_pos_rel / (norm + 1e-3)
+        target_vec_norm = self.target_pos_rel / (norm + 1e-5)
         cur_vel = self.root_states[:, 7:9]
         rew = torch.minimum(torch.sum(target_vec_norm * cur_vel, dim=-1), self.commands[:, 0]) / (self.commands[:, 0] + 1e-5)
-        command_mask = self.commands[:, 0] > 0.01
-        return rew * command_mask.float()
+        return rew
 
     def _reward_tracking_yaw(self):
         rew = torch.exp(-torch.abs(self.target_yaw - self.yaw))
