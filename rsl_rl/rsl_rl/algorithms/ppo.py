@@ -195,6 +195,22 @@ class PPO:
         for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
+                # Stratify the advantage by 'standing' and 'parkour' modes:
+                stand_mask = obs_batch[:, 10] <= 0.05
+                parkour_mask = ~stand_mask
+
+                if stand_mask.any():
+                    adv_stand = advantages_batch[stand_mask]
+                    # verify we have enough variance to normalize, else skip
+                    if adv_stand.std() > 1e-7:
+                        advantages_batch[stand_mask] = (adv_stand - adv_stand.mean()) / (adv_stand.std() + 1e-8)
+
+                # Normalize Parkour Advantages separately
+                if parkour_mask.any():
+                    adv_park = advantages_batch[parkour_mask]
+                    if adv_park.std() > 1e-7:
+                        advantages_batch[parkour_mask] = (adv_park - adv_park.mean()) / (adv_park.std() + 1e-8)
+
                 self.actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0]) # match distribution dimension
 
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
