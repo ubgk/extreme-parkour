@@ -1237,6 +1237,7 @@ class LeggedRobot(BaseTask):
 
     def _reward_standing_still(self):
         pos_err = torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1)
+        command_mask = self.commands[:, 0] <= 0.05
         return command_mask * torch.exp(-pos_err)
 
     def _reward_tracking_speed(self):
