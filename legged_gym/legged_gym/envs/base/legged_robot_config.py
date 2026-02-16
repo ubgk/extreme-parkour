@@ -294,12 +294,12 @@ class LeggedRobotCfg(BaseConfig):
     class rewards:
         class scales:
             # tracking rewards
+            standing_still = 2.0
             tracking_speed = 0.01
             tracking_goal_vel = 1.5
             tracking_yaw = 0.5
 
             # regularization rewards
-            standing_still = -0.5
             lin_vel_z = -1.0
             ang_vel_xy = -0.05
             orientation = -1.
